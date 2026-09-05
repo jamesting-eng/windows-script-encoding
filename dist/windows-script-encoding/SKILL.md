@@ -6,7 +6,6 @@ version: "1.0.6"
 summary: 避免 PowerShell 解析报错反复翻车——.ps1/.bat/.cmd 一律 CRLF + 纯 ASCII，运行前必做自检
 license: MIT
 tags:
-  - workbuddy
   - windows
   - powershell
   - 编码
@@ -115,7 +114,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
 ### 在不在 PATH 里的环境调 npm / node / python 不写绝对路径就崩
 
 - **症状**：.bat 里直接 `npm install`，挂"npm 不是内部或外部命令"（`python` / `node` 同理）
-- **根因**：managed 运行时（WorkBuddy / 便携版 / 用户安装版 / 供应商 SDK）把 Node、Python 等放在**不在系统 PATH** 的目录。光写 `npm` 找不到。
+- **根因**：managed 运行时（便携版 / 用户安装版 / 供应商 SDK）把 Node、Python 等放在**不在系统 PATH** 的目录。光写 `npm` 找不到。
 - **修复**：.bat 里写绝对路径。典型 managed Node 安装：
   - `<install-root>\node\versions\<version>\node.exe`
   - `<install-root>\node\versions\<version>\npm.cmd`
@@ -127,7 +126,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
 - **根因**：PowerShell 把 `& "..."` 解析成 call operator + 单个引号参数。不加 `&`，PowerShell 试图把引号字符串当成命令名。路径有空格 + 双引号，引号被当成命令行参数而不是路径的一部分
 - **修复**：路径前加 `&`。类比 Bash 的引用，但更显式：
   ```powershell
-  & "C:\Users\<user>\.workbuddy\binaries\node\versions\<version>\node.exe" server.js
+  & "<install-root>\node\versions\<version>\node.exe" server.js
   ```
 
 ### `start "" command` 出错就闪退看不到错误
@@ -321,8 +320,3 @@ Get-Content foo.txt | Measure-Object   # 行维度的统计，不是字符串维
 
 通用原则：**任何接受 "Depth / Encoding / PassThru / Raw / NoType" 等参数的 cmdlet，默认值是"系统相关"的，一律显式指定**。系统默认值跨 PS 版本、locale、平台都会变。
 
-## 关联铁律（跨项目记忆已有）
-
-- 用户级 `~/.workbuddy/MEMORY.md` "运行时环境坑"：`sitecustomize` 劫持 `os.unlink` → Python 删文件必须 `-S` 绕过
-- 用户级 `~/.workbuddy/MEMORY.md` 双端语言铁律 v2.1：脚本层永不翻译（`.bat` 纯 ASCII 0 非 ASCII 字节）
-- 项目级部署红线：`.bat`/`.cmd` 纯 ASCII + 删文件用 Python
