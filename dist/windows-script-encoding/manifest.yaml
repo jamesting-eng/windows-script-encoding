@@ -1,5 +1,5 @@
 name: windows-script-encoding
-version: 1.0.3
+version: 1.0.4
 description: "Windows 脚本（.ps1/.bat/.cmd）编码与行尾铁律，避免 PowerShell 解析报错反复翻车（CRLF + 纯 ASCII，运行前必做自检）"
 category: dev-tools
 author: jamesting-eng
