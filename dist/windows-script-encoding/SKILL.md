@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows 脚本编码铁律
-version: "1.0.2"
+version: "1.0.3"
 summary: 避免 PowerShell 解析报错反复翻车——.ps1/.bat/.cmd 一律 CRLF + 纯 ASCII，运行前必做自检
 license: MIT
 tags:
@@ -120,6 +120,44 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
   - `<install-root>\node\versions\<version>\node.exe`
   - `<install-root>\node\versions\<version>\npm.cmd`
 - **通用原则**：.bat 里调任何工具，要么写**绝对路径**，要么脚本顶部自己设 PATH（`set PATH=<dir>;%PATH%`）。别假定 PATH，别假定 CWD，别假定 `which X` 在 Windows 里跟 shell 一样。
+
+### PowerShell 路径含空格必须加 `&`（call operator）
+
+- **症状**：PowerShell 报 `'C:\Users\...\node.exe' 不是内部或外部命令`，明明加了引号
+- **根因**：PowerShell 把 `& "..."` 解析成 call operator + 单个引号参数。不加 `&`，PowerShell 试图把引号字符串当成命令名。路径有空格 + 双引号，引号被当成命令行参数而不是路径的一部分
+- **修复**：路径前加 `&`。类比 Bash 的引用，但更显式：
+  ```powershell
+  & "C:\Users\62588\.workbuddy\binaries\node\versions\22.22.2\node.exe" server.js
+  ```
+
+### `start "" command` 出错就闪退看不到错误
+
+- **症状**：双击 .bat，里面有 `start "" node server.js`，窗口闪100ms 就消失，啥错都看不到
+- **根因**：`start "" command` 开新窗口跑 `command`。如果 `command` 出错就退出，新窗口立刻关。错误永远看不到
+- **修复**：用 `cmd /k command` 替 `start "" command`。`/k` 标志告诉 CMD 命令结束后保留窗口。错误就显示出来了（要么窗口留着不动，要么 `pause` 暂停）：
+  ```bat
+  cmd /k "C:\path\to\node.exe server.js"
+  ```
+- **Bonus**：用 `title Amazon-Monitor-Backend` 设窗口标题，用户能认出哪个窗口是哪个
+
+### .bat 里嵌套引号会把 CMD 解析搞崩（拆成两个文件）
+
+- **症状**：.bat 里写 `cmd /k "%NODE%\server.js"`，运行时报以下任一：
+  - `'C:\...\node.exe server.js'`（路径被截断，引号丢了）
+  - `800A03EA JavaScript syntax error`（剩余内容被 WSH 当 JS 解析）
+- **根因**：Windows CMD 引号处理很脆。`"..."` 嵌套在 `cmd /k "..."` 里，解析器会迷失，要么丢内层引号（路径截断），要么把剩余内容丢给 WSH（Windows Script Host）执行。后者最迷惑——错误看起来跟你的脚本无关
+- **修复**：拆成两个文件。外层 .bat 做检查和分发，内层 .cmd 做实际工作，彻底避免嵌套：
+  - `launcher.bat`：校验环境，然后 `start "Window Title" cmd /k _run-server.cmd`
+  - `_run-server.cmd`：`cd` 到项目目录，跑 node，显示结果，`pause` 不关窗
+- **通用原则**：任何 .bat 原本需要在引号命令里做变量替换的场景，都优先用"拆文件"模式
+
+### 为什么纯 ASCII 让编码问题消失（编码无关性）
+
+- Windows CMD 用**系统 code page**（中文 Windows 一般是 GBK / CP936）解析 .bat 文件。UTF-8 无 BOM → 多字节序列变乱码。
+- 含中文的 .bat 文件两种正确修法：
+  1. **删掉中文**（首选）—— 写纯 ASCII。ASCII 字节在 GBK / UTF-8 / CP437 任何编码里解释都一致。这就是为啥铁律是"纯 ASCII + CRLF"
+  2. 文件存为 **GBK (CP936)** —— 匹配系统 code page，中文字符往返不丢。必须保留中文可读性时可用
+- **优先 1**：彻底消除编码问题。文件跨 code page 可移植。不需要 BOM 协商。不会有"我这次是用啥编码存的？"的惊吓。
 
 ## 关联铁律（跨项目记忆已有）
 - 用户级 `~/.workbuddy/MEMORY.md` "运行时环境坑"：`sitecustomize` 劫持 `os.unlink` → Python 删文件必须 `-S` 绕过
