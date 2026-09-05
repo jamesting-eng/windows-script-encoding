@@ -1,5 +1,5 @@
 name: windows-script-encoding
-version: 1.0.2
+version: 1.0.3
 description: "Windows script (.ps1/.bat/.cmd) encoding & line-ending iron rules — stop PowerShell parse-stage failures from recurring (CRLF + pure ASCII, self-check before run)"
 category: dev-tools
 author: jamesting-eng
