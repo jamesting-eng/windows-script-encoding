@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows 脚本编码铁律
-version: "1.0.3"
+version: "1.0.4"
 summary: 避免 PowerShell 解析报错反复翻车——.ps1/.bat/.cmd 一律 CRLF + 纯 ASCII，运行前必做自检
 license: MIT
 tags:
@@ -158,6 +158,40 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
   1. **删掉中文**（首选）—— 写纯 ASCII。ASCII 字节在 GBK / UTF-8 / CP437 任何编码里解释都一致。这就是为啥铁律是"纯 ASCII + CRLF"
   2. 文件存为 **GBK (CP936)** —— 匹配系统 code page，中文字符往返不丢。必须保留中文可读性时可用
 - **优先 1**：彻底消除编码问题。文件跨 code page 可移植。不需要 BOM 协商。不会有"我这次是用啥编码存的？"的惊吓。
+
+### PowerShell 把 GNU 风格的 `--flag` 当成自己的参数拦截了
+
+- **症状**：你给脚本/工具传 GNU 风格参数，比如 `python tool.py --target "C:\Users\foo" --force`，PowerShell 报 `A parameter cannot be found that matches parameter name 'target'`，可 `--target` 明明是给 `tool.py` 用的，不是给 PowerShell 的。
+- **根因**：PowerShell 用的是单横杠参数（`-Target`），不是双横杠。它没有原生的 `--flag` 约定。看到 `--target`，它会剥掉一个横杠、去找命令上名为 `target` 的参数——找不到就报错。双横杠 `--` 在 PowerShell 里是"停止解析"的特殊标记，但**只有单独成 token 才生效**，`--flag` 这种不认。
+- **修复**：阻止 PowerShell 解析这些参数：
+  - 用**停止解析标记 `--%`**：`python tool.py --% --target "C:\Users\foo" --force` —— `--%` 之后的内容原样透传（按 cmd.exe 语义，`%VAR%` 会展开，`$env:VAR` 不会）。
+  - 或**用 `&` 直接调原生 exe 并把参数拆成数组**：`& python.exe @('tool.py','--target',"C:\Users\foo",'--force')` —— 参数以数组传入时，PowerShell 会原样转发、不再二次解析。
+  - 或**丢给 cmd**：`cmd /c "python tool.py --target ""C:\Users\foo"" --force"`。
+- **通用原则**：只要通过 PowerShell 给非 PowerShell 工具转发 `--flag` GNU 风格参数，横杠就一定会咬你。要么停止解析、要么数组参数、要么走 cmd。
+
+### `$env:USERPROFILE` + 空格 + 通配符 `*` 静默什么都不做
+
+- **症状**：一条命令用 `$env:USERPROFILE` 拼路径、再用 `*` 通配，比如 `Remove-Item "$env:USERPROFILE\Documents\My Folder\*.log"`，看起来跑完了，却没删/没传任何东西——没报错、没输出。你以为它成功了。
+- **根因是三件事叠在一起**：
+  1. `$env:USERPROFILE` 每台机器不一样（公司机 = `C:\Users\62588`，家庭机 = `C:\Users\James Ting`）。变量没设或解析到别的盘，路径就直接错了——错路径通常匹配 0 个文件，于是 cmdlet 啥也不干。
+  2. **空格**：`C:\Users\James Ting` 带空格。一旦你哪次把路径引号掉了，空格把它劈成两个参数，命令就指向了错的（往往是空的）位置。
+  3. **`*` 通配符**：PowerShell 只在**自己的 cmdlet**（`Get-ChildItem`、`Remove-Item`、`Copy-Item`）里展开 `*`。当你把带 `*` 的路径传给**原生 .exe**，PowerShell **不会**展开通配——.exe 拿到的是字面的 `*`，要么报错、要么（更糟）静默匹配 0 个。
+- **修复**：
+  - 用 env 变量拼的路径**一律加引号**，哪怕"看起来安全"：`"$env:USERPROFILE\Documents\My Folder\*.log"`。
+  - **动手前先测解析后的路径**：`Test-Path "$env:USERPROFILE\Documents\My Folder"` —— 为 false 就大声报错，而不是静默 no-op。
+  - 通配请用 **PowerShell cmdlet**（它们会展开 `*`）；绝不要把带 `*` 的路径丢给原生 .exe 还指望它通配。
+  - 优先把路径解析进变量再断言存在：`$base = "$env:USERPROFILE\Documents\My Folder"; if (-not (Test-Path $base)) { Write-Error "missing $base"; exit 1 }`。
+
+### 运行时缺失要在脚本开头就检测，别让它埋到深处才崩
+
+- **症状**：一条 sync/清理/启动器脚本假定 `python` 或 `node` 存在，结果埋到第 40 行才莫名崩——要么日志里冒出 `python : The term 'python' is not recognized...`，要么就是 exit 1 没消息（见上面的错误吞噬坑）。
+- **根因**：跨设备方案里两台机器**不**一致。公司机有 managed Python 运行时，家庭机（LAPTOP-5RNP9DN3）没有。在一台上写的脚本，在另一台上跑，第一个 `python`/`node` 调用就死了，而且没有友好提示。
+- **修复——在每条调运行时的脚本顶部做守卫**：
+  - PowerShell：`if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Write-Error "Python not found on this machine"; exit 1 }`
+  - .bat：`where python >nul 2>nul || (echo Python not found on this machine & exit /b 1)`
+  - 知道 managed 运行时绝对路径时**优先查路径**：`Test-Path "C:\Users\...\binaries\python\versions\3.13.12\python.exe"`，找不到再退到 `Get-Command`。
+  - 打印**可执行**的提示（哪台机器、哪个运行时、期望路径），用户一步就能修好，不用去 debug 调用栈。
+- **通用原则**：fail fast、fail loud、fail with a next step。埋到第 40 行才 exit 1 的脚本是个黑盒；开头先查前置条件的脚本能自我诊断。
 
 ## 关联铁律（跨项目记忆已有）
 - 用户级 `~/.workbuddy/MEMORY.md` "运行时环境坑"：`sitecustomize` 劫持 `os.unlink` → Python 删文件必须 `-S` 绕过
