@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows 脚本编码铁律
-version: "1.0.5"
+version: "1.0.6"
 summary: 避免 PowerShell 解析报错反复翻车——.ps1/.bat/.cmd 一律 CRLF + 纯 ASCII，运行前必做自检
 license: MIT
 tags:
@@ -193,7 +193,136 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
   - 打印**可执行**的提示（哪台机器、哪个运行时、期望路径），用户一步就能修好，不用去 debug 调用栈。
 - **通用原则**：fail fast、fail loud、fail with a next step。埋到第 40 行才 exit 1 的脚本是个黑盒；开头先查前置条件的脚本能自我诊断。
 
+## PS cmdlet 默认值 / 跨版本 / 配置文件的隐藏雷
+
+### 文件编码陷阱：`Out-File` / `Set-Content` / `>` 重定向跨 PS 版本默认编码不一致
+
+PowerShell 的文件输出 cmdlet 在 **PS 5.1 和 PS 7+ 之间默认值完全不一致**。同一份脚本"在这台机器上跑通"，换台机器可能输出完全不同的字节布局。
+
+默认编码对照表：
+
+| cmdlet                          | PS 5.1 默认                | PS 7.0–7.3 默认 | PS 7.4+ 默认     |
+|---------------------------------|-----------------------------|------------------|------------------|
+| `Out-File -Encoding Default`    | 系统 code page（中文 Windows = GBK） | UTF-8（无 BOM）  | UTF-8（无 BOM）  |
+| `Set-Content -Encoding Default` | UTF-16 LE BOM               | UTF-8（无 BOM）  | UTF-8（无 BOM）  |
+| `>` 重定向                      | 跟 `Out-File`               | 跟 `Out-File`    | 跟 `Out-File`    |
+| `Add-Content`                   | 同 `Set-Content`            | 同 `Set-Content` | 同 `Set-Content` |
+| `Export-Csv -Encoding Default`  | ASCII（中文直接被吞掉！）   | UTF-8（无 BOM）  | UTF-8（无 BOM）  |
+| `Get-Content -Encoding Default` | 系统 code page（GBK）       | UTF-8（无 BOM）  | UTF-8（无 BOM）  |
+
+症状：
+- "我想写 UTF-8，结果文件是 GBK" → PS 5.1 + `Out-File -Encoding Default`
+- "我想写 ASCII，结果文件是 UTF-16 还带诡异 BOM" → PS 5.1 + `Set-Content -Encoding Default`
+- "CSV 里的中文全是问号 / 被截断" → PS 5.1 + `Export-Csv -Encoding Default`（默认就是 ASCII，中文直接被吞）
+
+修复：永远显式指定 encoding。要写跨平台 UTF-8：
+
+```powershell
+# 显式 UTF-8 带 BOM（Windows 友好，Excel/记事本能识别）
+'text' | Out-File -FilePath foo.txt -Encoding utf8BOM
+# 显式 UTF-8 不带 BOM（跨平台、JSON 安全）
+'text' | Out-File -FilePath foo.txt -Encoding utf8NoBOM
+# 永远不依赖 -Encoding Default
+```
+
+通用原则：**绝不信任 `-Encoding Default`**。PS 5.1 vs 7+ 在三个地方分叉，"Default" 完全取决于当前机器的系统 code page。
+
+### PS 7+ 别名抢注 Unix 原生命令
+
+PowerShell 7+ 内置了一组**抢注常见 Unix 命令名**的别名。你以为的 `curl` 行为可能根本不是 `curl.exe`，而是 `Invoke-WebRequest`（语法完全不一样、输出也完全不一样）。
+
+常见会咬人的别名：
+
+| 别名     | 绑定到             | 抢注的原生 exe | 风险                                              |
+|----------|--------------------|----------------|---------------------------------------------------|
+| `curl`   | `Invoke-WebRequest`| `curl.exe`     | 灾难级——语法不同、输出不同                       |
+| `wget`   | `Invoke-WebRequest`| `wget.exe`     | 同上                                              |
+| `cat`    | `Get-Content`      | （Windows 无） | 良性——除非你期望 Linux `cat` 语义                |
+| `ls`     | `Get-ChildItem`    | （Windows 无） | 良性——输出格式不一样                              |
+| `cp`     | `Copy-Item`        | （Windows 无） | 良性                                              |
+| `mv`     | `Move-Item`        | （Windows 无） | 良性                                              |
+| `rm`     | `Remove-Item`      | （Windows 无） | 良性                                              |
+| `man`    | `Get-Help`         | （Windows 无） | 良性                                              |
+| `mount`  | `New-PSDrive`      | （Windows 无） | 良性                                              |
+| `diff`   | `Compare-Object`   | （Windows 无） | 良性                                              |
+
+最危险的是前两个（`curl`、`wget`）——`Invoke-WebRequest` 用 `-Uri` 而不是位置参数，返回 `HtmlWebResponseObject` 而不是 stdout 文本。
+
+修复：用 call operator + `.exe` 强制定向到原生 exe：
+
+```powershell
+& curl.exe -fsSL https://example.com/file.zip -o file.zip
+& wget.exe https://example.com/file.zip
+```
+
+也可以 session 级反注册别名：`Remove-Item Alias:curl -Force`——但新会话失效。
+
+通用原则：**PS 7+ 上不要敲 `curl` / `wget` 然后期望原生行为**。要么刻意用 `Invoke-WebRequest` 的正确 PS 语法，要么用 `& curl.exe` / `& wget.exe` 绕开。
+
+### `$PROFILE` 损坏炸掉所有 PowerShell 会话
+
+如果用户的 `$PROFILE`（`$HOME\Documents\PowerShell\Microsoft.PowerShell_profile.ps1`）有语法错误，**每一个**新 PS 会话都会启动失败——静默地或带个莫名其妙的解析错误。这很阴险：
+- 会话打开了，看到"Windows PowerShell"或"PowerShell 7"字样——看起来正常
+- 提示符出不出来不一定
+- 任何触发 profile 重执行的 cmdlet 都会失败（导入用户模块、读 profile 路径等）
+- 你怪罪"环境"或"工具"
+
+自检姿势（会话行为诡异时跑）：
+
+```powershell
+Test-Path $PROFILE                                # 文件存在吗？
+Get-Content $PROFILE -ErrorAction SilentlyContinue # 内容是啥？
+pwsh -NoProfile                                    # 跳过 profile 启动——能跑就是 profile 的锅
+```
+
+恢复姿势（3 步）：
+1. `Rename-Item $PROFILE "$PROFILE.bak" -Force`（挪开，profile 不再执行）
+2. 开新 PS 会话——正常了
+3. 之后再修 `$PROFILE.bak`（在正常会话里粘内容，用 `pwsh -NoProfile -Command "Get-Content $PROFILE | ForEach-Object { [scriptblock]::Create($_) }"` lint）
+
+最佳实践：**让 `$PROFILE` 保持极简或为空**。不要把工作逻辑塞进去——那是计划任务 / 启动脚本该干的事。Profile 顶多放 `Set-PSReadLineOption` / `$host.UI.RawUI.WindowTitle = "..."` / 导入单个工具模块。一旦 profile 炸了，一整天都完蛋。
+
+### 三个静默咬人的 cmdlet 默认值
+
+还有三个默认值会让人在切换脚本上下文时踩坑：
+
+**1. `Get-Content` 不加 `-Raw` 返回的是行数组，不是字符串**
+
+```powershell
+(Get-Content foo.txt).Count   # 返回的是行数，不是字符数
+Get-Content foo.txt | Measure-Object   # 行维度的统计，不是字符串维度
+# 想拿整块字符串：
+(Get-Content foo.txt -Raw).Length   # 字符数
+```
+
+处理单行 JSON / 配置文件、或者管道给 `-match` 时，几乎一定要 `-Raw`。
+
+**2. `.ps1` 脚本不走 PATH 搜索**
+
+跟 `cmd`（搜 PATHEXT）和 `bash`（搜 PATH）都不一样，PowerShell 启动脚本必须：
+- 用 `.\` 前缀的相对路径：`.\cleanup.ps1`
+- 或者绝对路径：`& "C:\Users\me\scripts\cleanup.ps1"`
+- 或者脚本本身已在 `$env:PATH` 里、用 `& script.ps1` 调（`&` 走 `cmd /c` 语义、但文件还是要 full path 或当前目录可达）
+
+敲 `powershell cleanup.ps1` 报"the term 'cleanup.ps1' is not recognized"；敲 `node cleanup.js` 能跑（node 搜 PATH）。**这种不对称专门咬从 bash/node 转过来的人。**
+
+**3. `ConvertFrom-Json` 默认 Depth 2——深 JSON 静默截断**
+
+```powershell
+'{ "a": { "b": { "c": { "d": 1 } } } }' | ConvertFrom-Json
+# 返回 @{ a = @{ b = @{ c = @{ d = 1 } } } }   depth 4——OK
+# 但 depth 5：
+'{ "a": { "b": { "c": { "d": { "e": 2 } } } } }' | ConvertFrom-Json
+# a.b.c.d 变成 $null，因为 depth 2 截到 2 层
+# 报错：ConvertFrom-Json: The JSON depth exceeded the limit of 2
+```
+
+解析嵌套 JSON 时，永远显式 `-Depth 10`（或更高）。默认 2 是真实世界数据的非常低的天花板。
+
+通用原则：**任何接受 "Depth / Encoding / PassThru / Raw / NoType" 等参数的 cmdlet，默认值是"系统相关"的，一律显式指定**。系统默认值跨 PS 版本、locale、平台都会变。
+
 ## 关联铁律（跨项目记忆已有）
+
 - 用户级 `~/.workbuddy/MEMORY.md` "运行时环境坑"：`sitecustomize` 劫持 `os.unlink` → Python 删文件必须 `-S` 绕过
 - 用户级 `~/.workbuddy/MEMORY.md` 双端语言铁律 v2.1：脚本层永不翻译（`.bat` 纯 ASCII 0 非 ASCII 字节）
 - 项目级部署红线：`.bat`/`.cmd` 纯 ASCII + 删文件用 Python
