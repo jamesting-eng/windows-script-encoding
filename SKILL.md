@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows Script Encoding Iron Rules
-version: "1.0.5"
+version: "1.0.6"
 summary: Stop PowerShell parse-stage failures from recurring — write .ps1/.bat/.cmd with CRLF + pure ASCII and self-check before run
 license: MIT
 tags:
@@ -194,7 +194,136 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   - Print an **actionable** message (which machine, which runtime, the expected path) so the user can fix it in one step instead of debugging a stack trace.
 - **General principle**: fail fast, fail loud, fail with a next step. A script that dies 40 lines deep with exit 1 is a black box; a script that checks its prerequisites first is self-diagnosing.
 
+## PS cmdlet defaults / cross-version / profile pitfalls
+
+### File-encoding trap: `Out-File` / `Set-Content` / `>` redirection defaults differ across PS versions
+
+PowerShell's file-output cmdlets have **inconsistent default encodings across PS 5.1 and PS 7+**. The same script that "just works" on one machine produces a different byte layout on another.
+
+Default encoding matrix:
+
+| cmdlet                          | PS 5.1 default              | PS 7.0-7.3 default | PS 7.4+ default    |
+|---------------------------------|-----------------------------|--------------------|--------------------|
+| `Out-File -Encoding Default`    | system codepage (GBK zh-CN) | UTF-8 (no BOM)     | UTF-8 (no BOM)     |
+| `Set-Content -Encoding Default` | UTF-16 LE BOM               | UTF-8 (no BOM)     | UTF-8 (no BOM)     |
+| `>` redirection                 | follows `Out-File`          | follows `Out-File` | follows `Out-File` |
+| `Add-Content`                   | same as `Set-Content`       | same as `Set-Content` | same as `Set-Content` |
+| `Export-Csv -Encoding Default`  | ASCII (strips non-ASCII!)   | UTF-8 (no BOM)     | UTF-8 (no BOM)     |
+| `Get-Content -Encoding Default` | system codepage (GBK)       | UTF-8 (no BOM)     | UTF-8 (no BOM)     |
+
+Symptoms:
+- "I wrote UTF-8 but the file came out as GBK" -> PS 5.1 + `Out-File -Encoding Default`
+- "I wrote ASCII but the file came out as UTF-16 with weird BOM bytes" -> PS 5.1 + `Set-Content -Encoding Default`
+- "My CSV has `?` for all Chinese characters" -> PS 5.1 + `Export-Csv -Encoding Default` (default is ASCII in 5.1!)
+
+Fix: always specify encoding explicitly. For UTF-8 portable output:
+
+```powershell
+# explicit UTF-8 with BOM (Windows-friendly, Excel/NP++ recognize)
+'text' | Out-File -FilePath foo.txt -Encoding utf8BOM
+# explicit UTF-8 without BOM (cross-platform, JSON-safe)
+'text' | Out-File -FilePath foo.txt -Encoding utf8NoBOM
+# never rely on -Encoding Default
+```
+
+General principle: **never trust `-Encoding Default`**. PS 5.1 vs 7+ behavior diverges in three places, and your "Default" is whatever the current machine's system codepage happens to be.
+
+### PS 7+ aliases shadow native Unix commands
+
+PowerShell 7+ ships a set of aliases that **shadow common Unix command names**. A `curl` you expect to behave like `curl.exe` may instead call `Invoke-WebRequest` (totally different syntax, totally different output).
+
+Common aliases that bite:
+
+| alias   | binds to            | native exe shadowed | risk                                                       |
+|---------|---------------------|---------------------|------------------------------------------------------------|
+| `curl`  | `Invoke-WebRequest` | `curl.exe`          | catastrophic -- different syntax, different output         |
+| `wget`  | `Invoke-WebRequest` | `wget.exe`          | same as above                                              |
+| `cat`   | `Get-Content`       | (no native on Windows) | benign -- only confusing if expecting Linux `cat` semantics |
+| `ls`    | `Get-ChildItem`     | (no native)         | benign -- different output formatting                      |
+| `cp`    | `Copy-Item`         | (no native)         | benign                                                     |
+| `mv`    | `Move-Item`         | (no native)         | benign                                                     |
+| `rm`    | `Remove-Item`       | (no native)         | benign                                                     |
+| `man`   | `Get-Help`          | (no native)         | benign                                                     |
+| `mount` | `New-PSDrive`       | (no native)         | benign                                                     |
+| `diff`  | `Compare-Object`    | (no native)         | benign                                                     |
+
+The first two (`curl`, `wget`) are the dangerous ones -- `Invoke-WebRequest` uses `-Uri` not a positional URL, and returns `HtmlWebResponseObject` not stdout text.
+
+Fix: force the native exe with the call operator + `.exe`:
+
+```powershell
+& curl.exe -fsSL https://example.com/file.zip -o file.zip
+& wget.exe https://example.com/file.zip
+```
+
+You can also unregister the alias session-wide: `Remove-Item Alias:curl -Force` -- but that won't survive a new PS session.
+
+General principle: **on PS 7+, never type `curl` / `wget` and expect native behavior**. Either use `Invoke-WebRequest` deliberately with the correct PS syntax, or invoke `& curl.exe` / `& wget.exe` to bypass.
+
+### `$PROFILE` corruption breaks every PowerShell session
+
+If a user's `$PROFILE` (`$HOME\Documents\PowerShell\Microsoft.PowerShell_profile.ps1`) has a syntax error, **every** new PowerShell session fails to start -- silently or with a confusing parse error. This is insidious because:
+- The session opens, you see "Windows PowerShell" or "PowerShell 7" -- looks fine
+- The prompt may or may not appear
+- ANY cmdlet that imports the user's modules / reads the profile path / runs anything that triggers profile re-execution fails
+- You blame "the environment" or "the tool"
+
+Self-check (when sessions behave oddly):
+
+```powershell
+Test-Path $PROFILE                                # does the file exist?
+Get-Content $PROFILE -ErrorAction SilentlyContinue # what's in it?
+pwsh -NoProfile                                    # start without profile -- if this works, profile is the culprit
+```
+
+Recovery (3 steps):
+1. `Rename-Item $PROFILE "$PROFILE.bak" -Force` (move it aside, profile no longer runs)
+2. Open a new PS session -- it should work normally now
+3. Fix `$PROFILE.bak` later (in a normal session, paste contents, lint with `pwsh -NoProfile -Command "Get-Content $PROFILE | ForEach-Object { [scriptblock]::Create($_) }"`)
+
+Best practice: **keep `$PROFILE` minimal or empty**. Don't put work logic in it -- that's what scheduled tasks / startup scripts are for. Profile is for things like `Set-PSReadLineOption` / `$host.UI.RawUI.WindowTitle = "..."` / import a single utility module. If profile breaks, the rest of your day is ruined.
+
+### Three cmdlet defaults that silently bite
+
+Three more defaults that surprise people who switch between scripting contexts:
+
+**1. `Get-Content` without `-Raw` returns an array of lines, not a string**
+
+```powershell
+(Get-Content foo.txt).Count   # number of LINES, not characters
+Get-Content foo.txt | Measure-Object   # line metrics, not string metrics
+# to get a single string:
+(Get-Content foo.txt -Raw).Length   # character count
+```
+
+If you're processing a single-line JSON / config file, or piping into `-match`, you almost always want `-Raw`.
+
+**2. `.ps1` scripts are NOT searched in PATH**
+
+Unlike `cmd` (which searches PATHEXT) or `bash` (which searches PATH), PowerShell requires either:
+- a relative path with `.\` prefix: `.\cleanup.ps1`
+- an absolute path: `& "C:\Users\me\scripts\cleanup.ps1"`
+- the script reachable via `$env:PATH` with `& script.ps1` (this works because `&` invokes like `cmd /c` -- but the file still must be reachable by full path or current dir)
+
+Typing `powershell cleanup.ps1` fails with "the term 'cleanup.ps1' is not recognized". Typing `node cleanup.js` works because node searches PATH. **This asymmetry trips people coming from bash/node.**
+
+**3. `ConvertFrom-Json` defaults to Depth 2 -- silently truncates deeper JSON**
+
+```powershell
+'{ "a": { "b": { "c": { "d": 1 } } } }' | ConvertFrom-Json
+# returns @{ a = @{ b = @{ c = @{ d = 1 } } } }   depth 4 -- OK
+# but with depth 5:
+'{ "a": { "b": { "c": { "d": { "e": 2 } } } } }' | ConvertFrom-Json
+# a.b.c.d becomes $null because depth 2 truncates to 2 levels
+# Error: "ConvertFrom-Json: The JSON depth exceeded the limit of 2"
+```
+
+If you're parsing nested JSON, always pass `-Depth 10` (or higher) explicitly. Default of 2 is a very low ceiling for real-world data.
+
+General principle: **for any cmdlet that takes a "Depth / Encoding / PassThru / Raw / NoType" parameter that defaults to "system-dependent", set it explicitly.** System defaults change across PS versions, locales, and platforms.
+
 ## Related iron rules (already in cross-project memory)
+
 - User-level `~/.workbuddy/MEMORY.md` "Runtime environment pit": `sitecustomize` hijacks `os.unlink` → Python file deletion must use `-S` to bypass
 - User-level `~/.workbuddy/MEMORY.md` dual-language iron rule v2.1: scripts are never translated (`.bat` pure ASCII, 0 non-ASCII bytes)
 - Project-level deploy red lines: `.bat`/`.cmd` pure ASCII + delete files via Python
