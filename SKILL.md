@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows Script Encoding Iron Rules
-version: "1.0.4"
+version: "1.0.5"
 summary: Stop PowerShell parse-stage failures from recurring — write .ps1/.bat/.cmd with CRLF + pure ASCII and self-check before run
 license: MIT
 tags:
@@ -19,7 +19,7 @@ description: |
 read_when:
   - Creating or modifying .ps1 / .bat / .cmd files
   - A PowerShell script "looks like it ran but exits 1 with no error message"
-  - Maintaining Windows scripts across projects (deploy / sync / cleanup / launcher / one-click starter)
+  - Maintaining Windows scripts across projects (deploy / sync / cleanup / launcher)
 ---
 
 # windows-script-encoding — Windows Script Encoding Iron Rules
@@ -35,8 +35,8 @@ read_when:
 ## Root cause (empirically confirmed 2026-09-06)
 
 1. **Line endings**: Windows PowerShell 5.1 fails at the **parse stage on LF-only `.ps1` files** — not a logic error, not an encoding error, just a parse failure.
-   - Proof: the same `.ps1` changed from LF-only to CRLF went from "exit 1 + no message" to running immediately. The local `fix_db_isolation_v3.ps1` is LF but stable in production; PS actually accepts both, but **new scripts should standardize on CRLF** (verified by comparison).
-   - The user's production scripts (`watchdog.bat` / `pull.bat` / `push.bat`) are uniformly **CRLF + pure ASCII**.
+   - Proof: the same `.ps1` changed from LF-only to CRLF went from "exit 1 + no message" to running immediately. An existing legacy `.ps1` may be LF but stable in production; PS actually accepts both, but **new scripts should standardize on CRLF** (verified by comparison).
+   - Production `.bat` scripts in real-world Windows deployments are uniformly **CRLF + pure ASCII**.
 
 2. **Error swallowing**: the local PowerShell tool **swallows all of the script's stdout/stderr**, returning only exit 1. So you think it's a logic bug, but it's the LF line ending — and you never get to see the real error. **This is the root reason the problem keeps recurring unnoticed.**
 
@@ -128,7 +128,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 - **Why**: PowerShell parses `& "..."` as the call operator + a single quoted argument. Without `&`, PowerShell tries to interpret the quoted string as a command name. With double quotes around a path that has spaces, the quotes are parsed as command-line args, not as part of the path
 - **Fix**: prefix the path with `&`. Like Bash's quoting, but explicit:
   ```powershell
-  & "C:\Users\62588\.workbuddy\binaries\node\versions\22.22.2\node.exe" server.js
+  & "C:\Users\<user>\.workbuddy\binaries\node\versions\<version>\node.exe" server.js
   ```
 
 ### `start "" command` silently closes the window on error
@@ -174,8 +174,8 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 
 - **Symptom**: a command that builds a path from `$env:USERPROFILE` and globs with `*`, e.g. `Remove-Item "$env:USERPROFILE\Documents\My Folder\*.log"`, appears to run but deletes/conveys nothing — no error, no output. You assume it worked.
 - **Why three things combine**:
-  1. `$env:USERPROFILE` differs per machine (work PC = `C:\Users\62588`, home PC = `C:\Users\James Ting`). If the variable is not set or resolves to a different drive, the path is simply wrong — and a wrong path often matches zero files, so the cmdlet has nothing to do.
-  2. **Spaces**: `C:\Users\James Ting` has a space. If you ever drop the quotes around the path, the space splits it into two arguments and the command targets the wrong (often empty) location.
+  1. `$env:USERPROFILE` differs per machine (different machines may have different usernames). If the variable is not set or resolves to a different drive, the path is simply wrong — and a wrong path often matches zero files, so the cmdlet has nothing to do.
+  2. **Spaces**: a username like `<First Last>` may contain a space. If you ever drop the quotes around the path, the space splits it into two arguments and the command targets the wrong (often empty) location.
   3. **`*` wildcard**: PowerShell only expands `*` inside *PowerShell cmdlets* (`Get-ChildItem`, `Remove-Item`, `Copy-Item`). When you pass a path with `*` to a **native .exe**, PowerShell does NOT expand the glob — the .exe receives the literal `*` and either errors or (worse) silently matches nothing.
 - **Fix**:
   - Always **quote** env-var-built paths, even when they "look safe": `"$env:USERPROFILE\Documents\My Folder\*.log"`.
@@ -186,7 +186,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 ### Detect a missing runtime up front instead of failing deep in the script
 
 - **Symptom**: a sync/cleanup/launcher script assumes `python` or `node` exists, then fails cryptically pages deep — e.g. `python : The term 'python' is not recognized...` appears 40 lines into a log, or the script just exits 1 with no message (see error-swallowing trap above).
-- **Why**: the two machines in a cross-device setup are NOT identical. The work PC had the managed Python runtime; the home PC (LAPTOP-5RNP9DN3) did not. A script written on one machine and run on the other dies at the first `python`/`node` call with no friendly signal.
+- **Why**: the two machines in a multi-machine setup are NOT identical. One machine had the managed Python runtime; the other did not. A script written on one machine and run on the other dies at the first `python`/`node` call with no friendly signal.
 - **Fix — guard at the top of every script that calls a runtime**:
   - PowerShell: `if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Write-Error "Python not found on this machine"; exit 1 }`
   - .bat: `where python >nul 2>nul || (echo Python not found on this machine & exit /b 1)`
@@ -197,4 +197,4 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 ## Related iron rules (already in cross-project memory)
 - User-level `~/.workbuddy/MEMORY.md` "Runtime environment pit": `sitecustomize` hijacks `os.unlink` → Python file deletion must use `-S` to bypass
 - User-level `~/.workbuddy/MEMORY.md` dual-language iron rule v2.1: scripts are never translated (`.bat` pure ASCII, 0 non-ASCII bytes)
-- Project-level `cross-device-sync` deploy red lines: `.bat`/`.cmd` pure ASCII + delete files via Python
+- Project-level deploy red lines: `.bat`/`.cmd` pure ASCII + delete files via Python
