@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows Script Encoding Iron Rules
-version: "1.0.1"
+version: "1.0.2"
 summary: Stop PowerShell parse-stage failures from recurring — write .ps1/.bat/.cmd with CRLF + pure ASCII and self-check before run
 license: MIT
 tags:
@@ -104,6 +104,23 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   2. **Run a Python runner script** that loads the body from disk and invokes the API — keeps the Bash command line keyword-free
   3. **Reword descriptions/changelogs** to avoid the literal "PowerShell" word when not strictly needed ("shell parse-stage", "Windows scripting", etc.)
 - **Important**: this is a *Bash tool* block, not a *PowerShell tool* block. The PowerShell tool itself runs fine. The lesson: scan your Bash command line for the word "PowerShell" before running, especially when the command describes a Windows scripting topic.
+
+## Real-world failure cases (lessons from production .bat scripts)
+
+### `chcp 65001` + UTF-8 (no BOM) does NOT fix Chinese in .bat
+
+- **Symptom**: A .bat contains `chcp 65001` and Chinese text. Chinese characters still garble into random command tokens and the script fails with "XXX is not recognized as an internal or external command"
+- **Why it doesn't work**: `chcp 65001` switches the console code page to UTF-8 for *output*, but the Windows batch parser reads the .bat FILE bytes using the system code page (typically GBK on Chinese Windows). So UTF-8 bytes get interpreted as GBK and produce garbled command tokens. Without a UTF-8 BOM at the start of the file, the parser has no signal to use UTF-8.
+- **Fix**: don't put Chinese in the .bat. Use pure ASCII. `chcp 65001` is harmless on its own, but adding Chinese doesn't become safe just because the line is there.
+
+### Calling npm / node / python without absolute paths in non-PATH environments
+
+- **Symptom**: A .bat calls `npm install` directly and fails with "npm is not recognized as an internal or external command" (or `python` / `node` similarly)
+- **Why**: managed runtimes (WorkBuddy / portable installs / per-user installs / vendored SDKs) put Node, Python, etc. in paths that are NOT on the system PATH. A bare `npm` invocation can't find them.
+- **Fix**: write the absolute path explicitly in the .bat. Typical pattern for a managed Node install:
+  - `<install-root>\node\versions\<version>\node.exe`
+  - `<install-root>\node\versions\<version>\npm.cmd`
+- **General principle**: any tool the .bat invokes must be referenced by *absolute path* or by setting PATH at the top of the script (`set PATH=<dir>;%PATH%`). Don't assume PATH. Don't assume CWD. Don't assume that `which X` works the same way it does in a real shell.
 
 ## Related iron rules (already in cross-project memory)
 - User-level `~/.workbuddy/MEMORY.md` "Runtime environment pit": `sitecustomize` hijacks `os.unlink` → Python file deletion must use `-S` to bypass
