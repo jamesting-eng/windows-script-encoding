@@ -6,7 +6,6 @@ version: "1.0.6"
 summary: Stop PowerShell parse-stage failures from recurring — write .ps1/.bat/.cmd with CRLF + pure ASCII and self-check before run
 license: MIT
 tags:
-  - workbuddy
   - windows
   - powershell
   - encoding
@@ -116,7 +115,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 ### Calling npm / node / python without absolute paths in non-PATH environments
 
 - **Symptom**: A .bat calls `npm install` directly and fails with "npm is not recognized as an internal or external command" (or `python` / `node` similarly)
-- **Why**: managed runtimes (WorkBuddy / portable installs / per-user installs / vendored SDKs) put Node, Python, etc. in paths that are NOT on the system PATH. A bare `npm` invocation can't find them.
+- **Why**: managed runtimes (portable installs / per-user installs / vendored SDKs / CI-managed runtimes) put Node, Python, etc. in paths that are NOT on the system PATH. A bare `npm` invocation can't find them.
 - **Fix**: write the absolute path explicitly in the .bat. Typical pattern for a managed Node install:
   - `<install-root>\node\versions\<version>\node.exe`
   - `<install-root>\node\versions\<version>\npm.cmd`
@@ -128,7 +127,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 - **Why**: PowerShell parses `& "..."` as the call operator + a single quoted argument. Without `&`, PowerShell tries to interpret the quoted string as a command name. With double quotes around a path that has spaces, the quotes are parsed as command-line args, not as part of the path
 - **Fix**: prefix the path with `&`. Like Bash's quoting, but explicit:
   ```powershell
-  & "C:\Users\<user>\.workbuddy\binaries\node\versions\<version>\node.exe" server.js
+  & "<install-root>\node\versions\<version>\node.exe" server.js
   ```
 
 ### `start "" command` silently closes the window on error
@@ -322,8 +321,3 @@ If you're parsing nested JSON, always pass `-Depth 10` (or higher) explicitly. D
 
 General principle: **for any cmdlet that takes a "Depth / Encoding / PassThru / Raw / NoType" parameter that defaults to "system-dependent", set it explicitly.** System defaults change across PS versions, locales, and platforms.
 
-## Related iron rules (already in cross-project memory)
-
-- User-level `~/.workbuddy/MEMORY.md` "Runtime environment pit": `sitecustomize` hijacks `os.unlink` → Python file deletion must use `-S` to bypass
-- User-level `~/.workbuddy/MEMORY.md` dual-language iron rule v2.1: scripts are never translated (`.bat` pure ASCII, 0 non-ASCII bytes)
-- Project-level deploy red lines: `.bat`/`.cmd` pure ASCII + delete files via Python
