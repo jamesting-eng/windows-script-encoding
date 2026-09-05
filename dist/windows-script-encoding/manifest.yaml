@@ -1,0 +1,23 @@
+name: windows-script-encoding
+version: 1.0.0
+description: "Windows 脚本（.ps1/.bat/.cmd）编码与行尾铁律，避免 PowerShell 解析报错反复翻车（CRLF + 纯 ASCII，运行前必做自检）"
+category: dev-tools
+author: jamesting-eng
+license: MIT
+homepage: https://github.com/jamesting-eng/windows-script-encoding
+repository: https://github.com/jamesting-eng/windows-script-encoding
+keywords:
+  - windows
+  - powershell
+  - 编码
+  - 行尾
+  - crlf
+  - ascii
+  - 脚本
+  - workbuddy
+platforms:
+  - windows
+requirements:
+  - Windows 10/11
+  - PowerShell 5.1+ 或 PowerShell 7+
+  - Python 3.10+（用于安全写入文件）
