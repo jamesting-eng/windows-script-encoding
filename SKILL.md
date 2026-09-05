@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows Script Encoding Iron Rules
-version: "1.0.3"
+version: "1.0.4"
 summary: Stop PowerShell parse-stage failures from recurring — write .ps1/.bat/.cmd with CRLF + pure ASCII and self-check before run
 license: MIT
 tags:
@@ -159,6 +159,40 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   1. **Remove the Chinese** (preferred) — write pure ASCII. ASCII bytes are interpreted identically in GBK, UTF-8, CP437, anything. This is exactly why the iron rule is "pure ASCII + CRLF"
   2. Save the file as **GBK (CP936)** — matches the system code page, so Chinese characters round-trip correctly. Acceptable if you must keep Chinese for human readability.
 - **Prefer #1**: it removes the encoding question entirely. Files are portable across code pages. No BOM negotiation. No "which code page did I save this in?" surprise.
+
+### PowerShell intercepts GNU-style `--flags` as its own parameters
+
+- **Symptom**: You call a script/tool with GNU-style args, e.g. `python tool.py --target "C:\Users\foo" --force`, and PowerShell errors with `A parameter cannot be found that matches parameter name 'target'`, even though `--target` is meant for `tool.py`, not PowerShell.
+- **Why**: PowerShell uses single-dash parameters (`-Target`), not double-dash. It has no native `--flag` convention. When it sees `--target`, it strips one dash and looks for a parameter named `target` on the command being invoked — and fails because the command (here `python` via `-File`, or the script) does not expose that parameter. The double-dash `--` is a special *stop-parsing* marker in PowerShell, but only as a standalone token; `--flag` is not recognized.
+- **Fix**: stop PowerShell from parsing the arguments:
+  - Use the **stop-parsing token `--%`**: `python tool.py --% --target "C:\Users\foo" --force` — everything after `--%` is passed verbatim (cmd.exe-style, so `%VAR%` expands, `$env:VAR` does not).
+  - Or **invoke the native exe directly with `&`** and pass args as separate elements: `& python.exe @('tool.py','--target',"C:\Users\foo",'--force')` — when args are an array, PowerShell forwards them literally without re-parsing.
+  - Or **shell out to cmd**: `cmd /c "python tool.py --target ""C:\Users\foo"" --force"`.
+- **General principle**: any time you forward `--flag` GNU-style args through PowerShell to a non-PowerShell tool, the dashes will bite. Either stop-parsing, array-args, or cmd.
+
+### `$env:USERPROFILE` + spaces + wildcard `*` silently does nothing
+
+- **Symptom**: a command that builds a path from `$env:USERPROFILE` and globs with `*`, e.g. `Remove-Item "$env:USERPROFILE\Documents\My Folder\*.log"`, appears to run but deletes/conveys nothing — no error, no output. You assume it worked.
+- **Why three things combine**:
+  1. `$env:USERPROFILE` differs per machine (work PC = `C:\Users\62588`, home PC = `C:\Users\James Ting`). If the variable is not set or resolves to a different drive, the path is simply wrong — and a wrong path often matches zero files, so the cmdlet has nothing to do.
+  2. **Spaces**: `C:\Users\James Ting` has a space. If you ever drop the quotes around the path, the space splits it into two arguments and the command targets the wrong (often empty) location.
+  3. **`*` wildcard**: PowerShell only expands `*` inside *PowerShell cmdlets* (`Get-ChildItem`, `Remove-Item`, `Copy-Item`). When you pass a path with `*` to a **native .exe**, PowerShell does NOT expand the glob — the .exe receives the literal `*` and either errors or (worse) silently matches nothing.
+- **Fix**:
+  - Always **quote** env-var-built paths, even when they "look safe": `"$env:USERPROFILE\Documents\My Folder\*.log"`.
+  - **Test the resolved path before acting**: `Test-Path "$env:USERPROFILE\Documents\My Folder"` — fail loudly if false, instead of silently no-op-ing.
+  - For globbing, **use PowerShell cmdlets** (they expand `*`); never hand a `*` path to a native .exe and expect it to glob.
+  - Prefer resolving once into a variable and asserting it exists: `$base = "$env:USERPROFILE\Documents\My Folder"; if (-not (Test-Path $base)) { Write-Error "missing $base"; exit 1 }`.
+
+### Detect a missing runtime up front instead of failing deep in the script
+
+- **Symptom**: a sync/cleanup/launcher script assumes `python` or `node` exists, then fails cryptically pages deep — e.g. `python : The term 'python' is not recognized...` appears 40 lines into a log, or the script just exits 1 with no message (see error-swallowing trap above).
+- **Why**: the two machines in a cross-device setup are NOT identical. The work PC had the managed Python runtime; the home PC (LAPTOP-5RNP9DN3) did not. A script written on one machine and run on the other dies at the first `python`/`node` call with no friendly signal.
+- **Fix — guard at the top of every script that calls a runtime**:
+  - PowerShell: `if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Write-Error "Python not found on this machine"; exit 1 }`
+  - .bat: `where python >nul 2>nul || (echo Python not found on this machine & exit /b 1)`
+  - Prefer checking the **managed runtime's absolute path** when you know it: `Test-Path "C:\Users\...\binaries\python\versions\3.13.12\python.exe"` and fall back to `Get-Command` only if that is missing.
+  - Print an **actionable** message (which machine, which runtime, the expected path) so the user can fix it in one step instead of debugging a stack trace.
+- **General principle**: fail fast, fail loud, fail with a next step. A script that dies 40 lines deep with exit 1 is a black box; a script that checks its prerequisites first is self-diagnosing.
 
 ## Related iron rules (already in cross-project memory)
 - User-level `~/.workbuddy/MEMORY.md` "Runtime environment pit": `sitecustomize` hijacks `os.unlink` → Python file deletion must use `-S` to bypass
