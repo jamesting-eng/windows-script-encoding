@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows 脚本编码铁律
-version: "1.0.4"
+version: "1.0.5"
 summary: 避免 PowerShell 解析报错反复翻车——.ps1/.bat/.cmd 一律 CRLF + 纯 ASCII，运行前必做自检
 license: MIT
 tags:
@@ -18,7 +18,7 @@ description: |
 read_when:
   - 准备创建或修改 .ps1 / .bat / .cmd 文件
   - PowerShell 脚本 "看起来跑了但 exit 1 且没有任何错误信息"
-  - 跨项目维护 Windows 上的脚本（deploy / sync / cleanup / launcher / 一键启动器）
+  - 跨项目维护 Windows 上的脚本（deploy / sync / cleanup / launcher）
 ---
 
 # windows-script-encoding — Windows 脚本编码铁律
@@ -34,8 +34,8 @@ read_when:
 ## 根因（2026-09-06 实测确认）
 
 1. **行尾**：Windows PowerShell 5.1 对 **LF-only 的 `.ps1` 在解析阶段就失败**——不是逻辑错、不是编码错、就是语法解析不过。
-   - 实测：同一份 `.ps1`，从 LF-only 改成 CRLF，原本 "exit 1 + 无消息" 的脚本立刻跑通；本机 `fix_db_isolation_v3.ps1` 虽是 LF 但生产稳定，PS 实际两种都接受，但**新写脚本统一用 CRLF 才稳**（实测对比）
-   - 用户机器生产脚本（`watchdog.bat` / `pull.bat` / `push.bat`）清一色 **CRLF + 纯 ASCII**
+   - 实测：同一份 `.ps1`，从 LF-only 改成 CRLF，原本 "exit 1 + 无消息" 的脚本立刻跑通；历史遗留 `.ps1` 可能是 LF 但生产稳定，PS 实际两种都接受，但**新写脚本统一用 CRLF 才稳**（实测对比）
+   - 真实生产环境里的 `.bat` 脚本清一色 **CRLF + 纯 ASCII**
 
 2. **错误吞噬**：本机 PowerShell 工具把脚本的 stdout/stderr **全部吞掉了**，只回一个 exit 1。所以你以为是脚本逻辑有 bug，其实是 LF 行尾，且根本没机会看到真错。**这是元凶反复不被发现的根本原因。**
 
@@ -127,7 +127,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
 - **根因**：PowerShell 把 `& "..."` 解析成 call operator + 单个引号参数。不加 `&`，PowerShell 试图把引号字符串当成命令名。路径有空格 + 双引号，引号被当成命令行参数而不是路径的一部分
 - **修复**：路径前加 `&`。类比 Bash 的引用，但更显式：
   ```powershell
-  & "C:\Users\62588\.workbuddy\binaries\node\versions\22.22.2\node.exe" server.js
+  & "C:\Users\<user>\.workbuddy\binaries\node\versions\<version>\node.exe" server.js
   ```
 
 ### `start "" command` 出错就闪退看不到错误
@@ -173,8 +173,8 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
 
 - **症状**：一条命令用 `$env:USERPROFILE` 拼路径、再用 `*` 通配，比如 `Remove-Item "$env:USERPROFILE\Documents\My Folder\*.log"`，看起来跑完了，却没删/没传任何东西——没报错、没输出。你以为它成功了。
 - **根因是三件事叠在一起**：
-  1. `$env:USERPROFILE` 每台机器不一样（公司机 = `C:\Users\62588`，家庭机 = `C:\Users\James Ting`）。变量没设或解析到别的盘，路径就直接错了——错路径通常匹配 0 个文件，于是 cmdlet 啥也不干。
-  2. **空格**：`C:\Users\James Ting` 带空格。一旦你哪次把路径引号掉了，空格把它劈成两个参数，命令就指向了错的（往往是空的）位置。
+  1. `$env:USERPROFILE` 每台机器不一样（不同机器的用户名可能不同）。变量没设或解析到别的盘，路径就直接错了——错路径通常匹配 0 个文件，于是 cmdlet 啥也不干。
+  2. **空格**：用户名像 `<First Last>` 这种可能含空格。一旦你哪次把路径引号掉了，空格把它劈成两个参数，命令就指向了错的（往往是空的）位置。
   3. **`*` 通配符**：PowerShell 只在**自己的 cmdlet**（`Get-ChildItem`、`Remove-Item`、`Copy-Item`）里展开 `*`。当你把带 `*` 的路径传给**原生 .exe**，PowerShell **不会**展开通配——.exe 拿到的是字面的 `*`，要么报错、要么（更糟）静默匹配 0 个。
 - **修复**：
   - 用 env 变量拼的路径**一律加引号**，哪怕"看起来安全"：`"$env:USERPROFILE\Documents\My Folder\*.log"`。
@@ -185,7 +185,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
 ### 运行时缺失要在脚本开头就检测，别让它埋到深处才崩
 
 - **症状**：一条 sync/清理/启动器脚本假定 `python` 或 `node` 存在，结果埋到第 40 行才莫名崩——要么日志里冒出 `python : The term 'python' is not recognized...`，要么就是 exit 1 没消息（见上面的错误吞噬坑）。
-- **根因**：跨设备方案里两台机器**不**一致。公司机有 managed Python 运行时，家庭机（LAPTOP-5RNP9DN3）没有。在一台上写的脚本，在另一台上跑，第一个 `python`/`node` 调用就死了，而且没有友好提示。
+- **根因**：多机方案里两台机器**不**一致。一台有 managed Python 运行时，另一台没有。在一台上写的脚本，在另一台上跑，第一个 `python`/`node` 调用就死了，而且没有友好提示。
 - **修复——在每条调运行时的脚本顶部做守卫**：
   - PowerShell：`if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Write-Error "Python not found on this machine"; exit 1 }`
   - .bat：`where python >nul 2>nul || (echo Python not found on this machine & exit /b 1)`
@@ -196,4 +196,4 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
 ## 关联铁律（跨项目记忆已有）
 - 用户级 `~/.workbuddy/MEMORY.md` "运行时环境坑"：`sitecustomize` 劫持 `os.unlink` → Python 删文件必须 `-S` 绕过
 - 用户级 `~/.workbuddy/MEMORY.md` 双端语言铁律 v2.1：脚本层永不翻译（`.bat` 纯 ASCII 0 非 ASCII 字节）
-- 项目级 `cross-device-sync` 部署红线：`.bat`/`.cmd` 纯 ASCII + 删文件用 Python
+- 项目级部署红线：`.bat`/`.cmd` 纯 ASCII + 删文件用 Python
