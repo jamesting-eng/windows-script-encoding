@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows Script Encoding Iron Rules
-version: "1.0.2"
+version: "1.0.3"
 summary: Stop PowerShell parse-stage failures from recurring — write .ps1/.bat/.cmd with CRLF + pure ASCII and self-check before run
 license: MIT
 tags:
@@ -121,6 +121,44 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   - `<install-root>\node\versions\<version>\node.exe`
   - `<install-root>\node\versions\<version>\npm.cmd`
 - **General principle**: any tool the .bat invokes must be referenced by *absolute path* or by setting PATH at the top of the script (`set PATH=<dir>;%PATH%`). Don't assume PATH. Don't assume CWD. Don't assume that `which X` works the same way it does in a real shell.
+
+### PowerShell needs `&` (call operator) for paths with spaces
+
+- **Symptom**: PowerShell says `'C:\Users\...\node.exe' is not recognized as an internal or external command` even with quotes around the path
+- **Why**: PowerShell parses `& "..."` as the call operator + a single quoted argument. Without `&`, PowerShell tries to interpret the quoted string as a command name. With double quotes around a path that has spaces, the quotes are parsed as command-line args, not as part of the path
+- **Fix**: prefix the path with `&`. Like Bash's quoting, but explicit:
+  ```powershell
+  & "C:\Users\62588\.workbuddy\binaries\node\versions\22.22.2\node.exe" server.js
+  ```
+
+### `start "" command` silently closes the window on error
+
+- **Symptom**: User double-clicks a .bat containing `start "" node server.js`. The window flashes for ~100ms then disappears. No error visible.
+- **Why**: `start "" command` opens a new console window to run `command`. If `command` errors out, the new window closes immediately. You never see the error message.
+- **Fix**: use `cmd /k command` instead of `start "" command`. The `/k` flag tells CMD to keep the window open after the command exits. The error message stays visible (or stays at a `pause` prompt):
+  ```bat
+  cmd /k "C:\path\to\node.exe server.js"
+  ```
+- **Bonus**: set a custom title with `title Amazon-Monitor-Backend` so the user can tell which window is which when several are open.
+
+### Nested quotes in .bat files break CMD parsing (split into two files)
+
+- **Symptom**: A .bat contains `cmd /k "%NODE%\server.js"`. On run, you see one of:
+  - `'C:\...\node.exe server.js'` (path truncated, inner quote lost)
+  - `800A03EA JavaScript syntax error` (remaining content handed off to WSH, which tries to run it as JavaScript)
+- **Why**: Windows CMD's quote handling is fragile. `"..."` nested inside `cmd /k "..."` confuses the parser — either the inner quotes get dropped (path truncated) or the remaining content is interpreted as a script by WSH (Windows Script Host). The "remaining content becomes a JS file" mode is the most confusing failure because the error looks unrelated to your script.
+- **Fix**: split into two files. Outer .bat does environment checks; inner .cmd does the actual work. Avoids nesting entirely:
+  - `launcher.bat`: validate Node exists, then `start "Window Title" cmd /k _run-server.cmd`
+  - `_run-server.cmd`: `cd` to project dir, run node, show result, `pause` to keep window open
+- **General principle**: any time your .bat would otherwise need variable substitution inside a quoted command, prefer the split-file pattern.
+
+### Why pure ASCII makes the encoding question disappear (encoding-agnostic)
+
+- Windows CMD parses .bat files using the **system code page** (typically GBK / CP936 on Chinese Windows). UTF-8 without BOM → garbled multi-byte sequences.
+- Two valid fixes for .bat files that contain Chinese characters:
+  1. **Remove the Chinese** (preferred) — write pure ASCII. ASCII bytes are interpreted identically in GBK, UTF-8, CP437, anything. This is exactly why the iron rule is "pure ASCII + CRLF"
+  2. Save the file as **GBK (CP936)** — matches the system code page, so Chinese characters round-trip correctly. Acceptable if you must keep Chinese for human readability.
+- **Prefer #1**: it removes the encoding question entirely. Files are portable across code pages. No BOM negotiation. No "which code page did I save this in?" surprise.
 
 ## Related iron rules (already in cross-project memory)
 - User-level `~/.workbuddy/MEMORY.md` "Runtime environment pit": `sitecustomize` hijacks `os.unlink` → Python file deletion must use `-S` to bypass
