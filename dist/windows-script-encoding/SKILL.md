@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows 脚本编码铁律
-version: "1.0.1"
+version: "1.0.2"
 summary: 避免 PowerShell 解析报错反复翻车——.ps1/.bat/.cmd 一律 CRLF + 纯 ASCII，运行前必做自检
 license: MIT
 tags:
@@ -103,6 +103,23 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
   2. **跑一个 Python runner 脚本**，从磁盘读 body 再调 API——保证 Bash 命令行里看不到该关键词
   3. **改描述 / changelog 措辞**，不严格需要 "PowerShell" 字样时直接换词（"shell parse-stage"、"Windows 脚本"等）
 - **关键**：这是 **Bash 工具**的拦截，**不是 PowerShell 工具**的。PowerShell 工具本身跑得没问题。教训：写涉及 Windows 脚本主题的 Bash 命令前，先扫一眼命令行本身。
+
+## 实战翻车案例（生产 .bat 脚本的教训）
+
+### `chcp 65001` + UTF-8 无 BOM 不能救 .bat 里的中文
+
+- **症状**：.bat 里加了 `chcp 65001` 还放了中文，中文还是解析成乱码命令，脚本报"XXX 不是内部或外部命令"挂掉
+- **为啥没用**：`chcp 65001` 只切了**控制台输出**的 code page 为 UTF-8，但 Windows 的批处理解析器读 .bat **文件字节**用的是**系统 code page**（中文 Windows 一般是 GBK）。UTF-8 字节被当 GBK 解析，就成了乱码命令 token。文件开头没有 UTF-8 BOM，解析器根本没有 UTF-8 信号。
+- **修复**：.bat 里不放中文，纯 ASCII。`chcp 65001` 这行本身无害，但**光加它不能让 .bat 里的中文变安全**。
+
+### 在不在 PATH 里的环境调 npm / node / python 不写绝对路径就崩
+
+- **症状**：.bat 里直接 `npm install`，挂"npm 不是内部或外部命令"（`python` / `node` 同理）
+- **根因**：managed 运行时（WorkBuddy / 便携版 / 用户安装版 / 供应商 SDK）把 Node、Python 等放在**不在系统 PATH** 的目录。光写 `npm` 找不到。
+- **修复**：.bat 里写绝对路径。典型 managed Node 安装：
+  - `<install-root>\node\versions\<version>\node.exe`
+  - `<install-root>\node\versions\<version>\npm.cmd`
+- **通用原则**：.bat 里调任何工具，要么写**绝对路径**，要么脚本顶部自己设 PATH（`set PATH=<dir>;%PATH%`）。别假定 PATH，别假定 CWD，别假定 `which X` 在 Windows 里跟 shell 一样。
 
 ## 关联铁律（跨项目记忆已有）
 - 用户级 `~/.workbuddy/MEMORY.md` "运行时环境坑"：`sitecustomize` 劫持 `os.unlink` → Python 删文件必须 `-S` 绕过
