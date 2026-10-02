@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows 脚本编码铁律
-version: "1.5.1"
+version: "1.5.2"
 summary: 避免 PowerShell 解析报错反复翻车——.ps1/.bat/.cmd 一律 CRLF + 纯 ASCII，运行前必做自检
 license: MIT
 tags:
@@ -45,11 +45,11 @@ read_when:
 6. **兜底顺序**：PowerShell inline → 自检过的 .ps1 → Bash 通道跑 Python。
 
 ## 触发症状（"我之前就在不同的项目对话里发生过好多次了"那种）
-- PowerShell 脚本在用户机器上**"解析阶段就报错了（语法问题）"**，但工具回显里**完全看不到错误信息**，只看到 exit 1
+- PowerShell 脚本在目标机器上**"解析阶段就报错了（语法问题）"**，但工具回显里**完全看不到错误信息**，只看到 exit 1
 - 同一段 PowerShell 代码，连续改几次"格式"才能跑通——多半是 LF ↔ CRLF 的反复横跳
 - 用户历史教训：`.bat` / `.cmd` 内有中文注释 → GBK 乱码 → WSH 把 `.js` 误执行 → 报 `800A03EA`（已在长期记忆，纯 ASCII 写入）。`.ps1` 这次是新坑，症状相似但元凶不同
 
-## 根因（2026-09-06 实测确认）
+## 根因（实测确认）
 
 1. **行尾**：Windows PowerShell 5.1 对 **LF-only 的 `.ps1` 在解析阶段就失败**——不是逻辑错、不是编码错、就是语法解析不过。
    - 实测：同一份 `.ps1`，从 LF-only 改成 CRLF，原本 "exit 1 + 无消息" 的脚本立刻跑通；历史遗留 `.ps1` 可能是 LF 但生产稳定，PS 实际两种都接受，但**新写脚本统一用 CRLF 才稳**（实测对比）
@@ -164,7 +164,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
   ```bat
   cmd /k "C:\path\to\node.exe server.js"
   ```
-- **Bonus**：用 `title Amazon-Monitor-Backend` 设窗口标题，用户能认出哪个窗口是哪个
+- **Bonus**：用 `title My-App-Server` 设窗口标题，用户能认出哪个窗口是哪个
 
 ### .bat 里嵌套引号会把 CMD 解析搞崩（拆成两个文件）
 
@@ -219,7 +219,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
   - 打印**可执行**的提示（哪台机器、哪个运行时、期望路径），用户一步就能修好，不用去 debug 调用栈。
 - **通用原则**：fail fast、fail loud、fail with a next step。埋到第 40 行才 exit 1 的脚本是个黑盒；开头先查前置条件的脚本能自我诊断。
 
-## 启动器、云盘目录与沙箱测试的坑（2026-09-29 批次——一天内全踩中）
+## 启动器、云盘目录与沙箱测试的坑
 
 ### 批处理「窗口只闪一下横幅就关闭」
 
@@ -227,7 +227,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
 - **根因**：**多行括号块 + LF-only 换行**。脚本用了 `if ... ( for ... ( if ... ) )` 嵌套块，而写入工具输出的是 LF。CMD 解析器在这种组合上直接中止整个批处理——窗口一关，任何报错都活不下来。
 - **修法（两条都要）**：
   1. **.bat/.cmd 禁用多行括号块——改用 goto 流程。** 每个分支是一个 `:label`；每个 if 都是单行或 goto。这样即使被 LF 虐也能正确解析。
-  2. **CRLF 仍然强制**——写完转换后必须**用二进制读校验**（`data.count(b'\r\n')`、统计裸 `b'\n'`），因为文本模式读会把 CRLF→LF 转译，让你在自检本身上吃到**假阴性**（本人就踩了这个假阴性）。
+  2. **CRLF 仍然强制**——写完转换后必须**用二进制读校验**（`data.count(b'\r\n')`、统计裸 `b'\n'`），因为文本模式读会把 CRLF→LF 转译，让你在自检本身上吃到**假阴性**（这个假阴性就会发生）。
 - **注**：Edit/Write 工具输出的是 LF。用它们写 .bat/.cmd 也可以，*前提*是写完做 CRLF 转换 + 二进制复验；但按上面的铁律，Python 二进制写 + 强制 CRLF 才是一步到位的安全路径。
 
 ### 纯 ASCII 自检不止查 echo 正文——start 窗口标题也算
@@ -248,7 +248,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
 - 启动器是一个**薄壳**：解析环境 → `start` 唯一的服务器窗口 → 打开浏览器 → **启动器窗口自己退出**。屏幕上恰好只剩一个窗口（运行中的服务器，标题含「离线可用 - Ctrl+C 停止」），外加自动打开的浏览器。
 - 端口已被监听 → 只开浏览器，绝不开第二个窗口。
 - **双机规则**：禁止硬编码用户名绝对路径、禁止机器专属盘符；运行时解析 Node（系统 `node` → 用户目录下的托管安装）；所有路径相对脚本自身；仓库（含构建好的 `dist/`）由同步层分发，同样的相对布局在每台机器上都成立。
-- 测试开关：给脚本加一个环境变量熔断开关（如 `ORBIT_DRY=1`），只打印将要执行的动作而不真执行——不用拉起任何窗口就能端到端验证整个脚本的解析。
+- 测试开关：给脚本加一个环境变量熔断开关（如 `DRY_RUN=1`），只打印将要执行的动作而不真执行——不用拉起任何窗口就能端到端验证整个脚本的解析。
 
 ### 流重定向下测试 .bat 会触发「不支持输入重定向」
 
@@ -269,20 +269,20 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
 - **修法**：与「PowerShell」字样拦截同一套打法——**用 Write 工具写文件**，再跑一个命令行里不含 Windows 脚本关键词的 Python 转换（CRLF 转换 / 编码检查）。heredoc 正文里的批处理语法足以触发扫描器。
 
 
-### 静默 exit-49：Bash 命令文本里任何位置出现 `copy` 一词都会被拦，且零输出（2026-10-01）
+### 静默 exit-49：Bash 命令文本里任何位置出现 `copy` 一词都会被拦，且零输出
 
 - **症状**：命令退出码 49，stdout 和 stderr 全空——连「被拦截」的提示都没有。看起来像莫名崩溃，其实是安全扫描器。
-- **已证实的触发（2026-10-01 探测）**：命令文本里任何位置的子串 `copy`/`Copy`——三个全被拦：带 `print('copy Copy viewMode onDownload')` 的 python -c、正则 `re.finditer(rb'viewMode|onDownload|copy|Copy')`、以及 print 消息里含 "copyable"（含 copy 子串）的 heredoc。对照组正常：同样形状但不含该词的命令、`echo '<br/>'`（br 标签不触发）。
+- **已证实的触发（ 探测）**：命令文本里任何位置的子串 `copy`/`Copy`——三个全被拦：带 `print('copy Copy viewMode onDownload')` 的 python -c、正则 `re.finditer(rb'viewMode|onDownload|copy|Copy')`、以及 print 消息里含 "copyable"（含 copy 子串）的 heredoc。对照组正常：同样形状但不含该词的命令、`echo '<br/>'`（br 标签不触发）。
 - **为什么比「PowerShell」字面拦截更阴**：零反馈——任何地方都没有错误文本，唯一症状就是 exit 49。
 - **修法**：审计**整条命令文本**里藏在单词内部的 Windows 命令关键词（`copyable`、`Copy2`、`recycle`...）、引号字符串、正则、print/日志消息——别只看 shell 语法。然后改词（duplicate/clone），或把内容写进文件按路径运行，或走 PowerShell 工具通道（不受影响）。
 
-### N20 后续（同一批次，S1–S7 交付过程中新学到的）
+### 同一交付周期的后续教训
 
 **Edit 工具大块切除 TSX/TS 后——立即跑 tsc**
 
 - **症状**：用 Edit 工具删除一大块 JSX 后留下了不配对的 `</div>` 和悬空引用——靠两个 `tsc` 报错秒级定位，但前提是闸门紧跟在手术后跑。
 - **规则**：任何大块切除后**立即 `tsc --noEmit`**。类型检查是手术干净与否的最便宜证明；绝不做多次手术攒一起再查。（同一天同一文件踩了两次。）
-- **扩展（2026-09-30）**：本条同样适用于 **Write 工具的整文件重写**——重写会静默丢掉所有 import 语句（代价：部署页整页白屏）。新鲜镜像上的 tsc 闸门是兜底的网；重写完先 grep 文件头部的 import 行。
+- **扩展（）**：本条同样适用于 **Write 工具的整文件重写**——重写会静默丢掉所有 import 语句（代价：部署页整页白屏）。新鲜镜像上的 tsc 闸门是兜底的网；重写完先 grep 文件头部的 import 行。
 
 **bash `-c "..."` 载荷含双引号时会断**
 
@@ -291,18 +291,18 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
 
 **翻转能力开关 → grep 并同步每一条断言它的守卫测试**
 
-- **症状**：翻转 `report.export` / `report.whitelabel` 权益时连锁失败了**三条**守卫测试（全矩阵行、"四项全 false"的圣洁性循环、BillingPage 角标计数断言）外加一条 `upgradeTo` 链路期望。
+- **症状**：翻转 功能开关 权益时连锁失败了**三条**守卫测试（全矩阵行、"四项全 false"的圣洁性循环、BillingPage 角标计数断言）外加一条 `upgradeTo` 链路期望。
 - **规则**：权益/功能开关会在**多处**守卫测试中被断言（矩阵行、圣洁性循环、UI 角标计数、upgradeTo 链）。翻转前先 grep 开关名扫全部测试文件，同一个 commit 里更新每一条断言——否则圣洁性守卫会拒绝你的翻转，白白烧时间重读"失败"的用例。
 
 **多模式脚本：真实运行的所有出口必须 pause（干跑出口保持静默）**
 
-- **症状**：一个带干跑开关（`ORBIT_DRY=1`）的迁移脚本运行正常、活也干完了——但窗口在跑完瞬间自关，用户从没看到 "MIGRATION COMPLETE"，只能靠抢截图看过程。
+- **症状**：一个带干跑开关（`DRY_RUN=1`）的迁移脚本运行正常、活也干完了——但窗口在跑完瞬间自关，用户从没看到 "MIGRATION COMPLETE"，只能靠抢截图看过程。
 - **根因**：成功路径路由到了**共享出口标签** `:dry_end`，而那是按干跑模式写的（`exit /b 0`，无 pause）。真实运行继承了静默出口，成功后自动关窗。
 - **规则**：任何带模式开关的用户可见 .bat/.cmd，**真实运行可达的每一条终止路径都必须以 `pause` 结尾**；只有干跑模式静默退出。共享出口实现为模式条件式：
   ```bat
   :end
-  if "%ORBIT_DRY%"=="1" echo [DRY] Dry run finished - nothing was executed.
-  if "%ORBIT_DRY%"=="1" exit /b 0
+  if "%DRY_RUN%"=="1" echo [DRY] Dry run finished - nothing was executed.
+  if "%DRY_RUN%"=="1" exit /b 0
   echo.
   pause
   exit /b 0
@@ -312,22 +312,22 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
 ### 测试闸门必须跑在新鲜镜像上：不同步 = 测旧代码
 
 - **症状**：一个整页重写带着坏文件上线（import 语句全丢）——闸门却 1000+ 测试全绿。部署页白屏（运行时 `ReferenceError: Link is not defined`）。
-- **根因**：全量闸门（`runtest.py`）跑在 **D 盘镜像**（`D:\WorkBuddy\orbit-ops-test`）上。改完 C 盘文件后直接跑它，**并不会同步工作区**——闸门测的是旧镜像，不是你刚改的代码。
+- **根因**：全量闸门（`runtest.py`）跑在 **D 盘镜像**（`D 盘镜像工作区`）上。改完 C 盘文件后直接跑它，**并不会同步工作区**——闸门测的是旧镜像，不是你刚改的代码。
 - **规则**：改完源码后**先同步、再闸门**——用 `sync_and_verify.py`（同步 + tsc + vitest 一步到位，带私有 Temp），绝不在我改完文件后直接裸跑 `runtest.py`。
 - **推论**：Write 工具的**整文件重写**也会静默丢 import 语句（不止大块切除）——新鲜镜像上的 tsc 就是兜底的网。重写完先看一眼文件头部的 import 行。
 
 ### 部署页运行时探针：1000 个单元测试抓不住坏部署
 
-- **症状**：部署后的 changelog 页在两个浏览器强刷后仍白屏；单元测试全绿；服务器上每个资产字节级一致。
+- **症状**：部署后的 某个已部署页面在两个浏览器强刷后仍白屏；单元测试全绿；服务器上每个资产字节级一致。
 - **为什么单元测试抓不住**：它们在 jsdom 里渲染组件。部署包在真浏览器里的失败方式不同——模块加载、浏览器专属路径，以及（关键的）被旧闸门漏测的改动。
 - **规则**：每次部署后跑**运行时探针**（`scripts/_probe_changelog.cjs` 模式）：无头 chromium 加载部署 URL，捕获 `console.error` / `pageerror` / `requestfailed`，并断言 `#root` 真渲染了内容（innerHTML 长度 > 0）。零捕获问题 = 这次部署超越 sha256 的验证。
 - **值得记住的签名**：渲染时 `X is not defined` = 某个 JSX 标识符丢了 import（整文件重写的伤亡）。
 
-## i18n 批次教训（2026-09-30 批次——全站三语化）
+## 国际化与文本重构陷阱
 
 ### 多个并行 worker 编辑同一个共享文件会把文件改坏（词典文件）
 
-- **症状**：N 个并行 worker 各自往同一个 `dict-en.ts` / `dict-tw.ts`「追加词条」后，tsc 报重复键（TS1117）、悬空 `};`、未闭合字符串——文件结构被撕碎了。
+- **症状**：N 个并行 worker 各自往同一个 翻译文件「追加词条」后，tsc 报重复键（TS1117）、悬空 `};`、未闭合字符串——文件结构被撕碎了。
 - **根因**：并行 worker 读到的是同一份过期快照，然后各自写回自己的版本；last-writer-wins + 交错追加 = 重复键 + 撕裂的语法。损坏一直活到类型检查才被抓住。
 - **修法**：
   1. **共享文件的编辑必须串行**——同一时间窗口内一个 worker 独占词典文件；其他 worker 把词条当数据（JSON 附在任务消息里）交上来，由独占者合并。
@@ -336,11 +336,11 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
 
 ### i18n 包裹会打碎 `getByText('精确字符串')` 测试断言
 
-- **症状**：页面文案用 `t(...)` 包裹后，跑了几周的测试突然在 `getByText('品类报告（未归属项目）')` 上挂了——字符串明明还在页面上，但匹配器什么都找不到（或者找到一堆重复）。
+- **症状**：页面文案用 `t(...)` 包裹后，跑了几周的测试突然在 `getByText('精确文本')` 上挂了——字符串明明还在页面上，但匹配器什么都找不到（或者找到一堆重复）。
 - **根因**：i18n 会把一个文本节点拆成多个 React 文本节点（`{t('a')}（{n}）` 渲染成独立节点）。`getByText` 默认逐节点匹配，「同一个可见字符串」不再是一个节点了。
 - **修法**：锚定稳定的容器，而不是精确的文本节点：
   ```ts
-  screen.getAllByText('品类报告（未归属项目）', { exact: false })
+  screen.getAllByText('精确文本', { exact: false })
     .map(e => e.closest('div.bg-white'))
     .find(x => x !== null)
   ```
@@ -354,32 +354,32 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
 - **修法**：辅助用 .js/.cjs/.mjs 脚本注释一律 ASCII（或不写注释）。中文放 SKILL.md / 文档里，不放交付脚本里。
 - **推论**：ASCII 读回自检（`io.open(path, encoding='ascii')`）对这些文件同样适用——和 .bat 一样。
 
-### 中央词典 + 单参数 t()：把「包裹」和「翻译」解耦
+### 中央翻译库 + 单参数 t()：把「包裹」和「翻译」解耦
 
-- **模式**（让 4-worker 并行 i18n 批次活下来的设计）：`t(zh, en?, tw?)` 把**内联中文字符串当键**；英文/繁体词条放中央 `dict-en.ts` / `dict-tw.ts`，渲染时作为 fallback 查询。
-- **为什么重要**：worker 们可以并行包几千个 `t('中文')`（不写共享文件）；翻译随后在中央词典里渐进推进；缺词条就回落中文，不崩。
+- **模式**（让 并行翻译包裹活下来的设计）：`t(source, ...fallbacks)` 把**内联中文字符串当键**；英文/繁体词条放中央 翻译文件，渲染时作为 fallback 查询。
+- **为什么重要**：worker 们可以并行包几千个 `t('source-text')`（不写共享文件）；翻译随后在中央翻译库里渐进推进；缺词条就回落中文，不崩。
 - **规则**：把大型机械重构拆给并行 worker 时，设计接口让每个 worker 的写入集不相交（按页面拆文件可以并行，共享词典不行）。共享产物最后由一个所有者统一合并。
 
-## i18n 全量收尾第二批（2026-09-30 深夜 → 10-01）
+## 更多国际化陷阱：存储清理与校验
 
 ### 应用自己的批量存储清理会吃掉共享前缀的偏好设置
 
-- **症状**：切语言「总是变回中文」。探针诊断：应用代码一跑起来 `localStorage.getItem('orbit:lang')` 就是 null——明明探针在应用代码之前就写好了。
-- **根因**：应用的 `resetAll()` 在首启 reseed / 升版时按 `orbit:` 前缀清空全部数据分桶——而语言键 `orbit:lang` 恰好撞上这个前缀。应用把自己的用户偏好删了。
-- **修法**：清扫逻辑显式豁免非数据键（`if (k === 'orbit:lang') continue;`）。
+- **症状**：切语言「总是变回中文」。探针诊断：应用代码一跑起来 `localStorage.getItem('app:lang')` 就是 null——明明探针在应用代码之前就写好了。
+- **根因**：应用的 `resetAll()` 在首启 reseed / 升版时按 `app:` 前缀清空全部数据分桶——而语言键 `app:lang` 恰好撞上这个前缀。应用把自己的用户偏好删了。
+- **修法**：清扫逻辑显式豁免非数据键（`if (k === 'app:lang') continue;`）。
 - **通用原则**：按前缀批量清理会吃掉任何共享该前缀的键。UI 偏好不是数据分桶——要么显式豁免，要么把命名空间挪出清扫范围。
 
 ### 单次运行时探针只看得到它能触达的应用状态
 
-- **症状**：探针报全路由 0 中文残留；用户截图里工作台首页照样有中文。
-- **为什么（两层）**：① 首启逻辑把 `/app` 重定向到新手引导——探针（全新会话）**根本没渲染过工作台首页**；② 漏的内容是按日期轮换的演示数据（每日待办按当天日期挑选），就算碰巧跑一次也未必展示全部字符串。
-- **修法**：探针在导航前预置应用状态标记（`localStorage.setItem('orbit:ui', JSON.stringify({state:{onboardingDone:true},version:0}))`——zustand persist 结构），让被门槛挡住的页面真正渲染；**并且**用**静态审计**补位：把页面文件里所有中文字符串字面量提出来、与词典键做差——静态覆盖不受渲染条件影响。
+- **症状**：探针报全路由 0 中文残留；截图里主仪表盘照样有中文。
+- **为什么（两层）**：① 首启逻辑把 `/app` 重定向到新手引导——探针（全新会话）**根本没渲染过主仪表盘**；② 漏的内容是按日期轮换的演示数据（每日待办按当天日期挑选），就算碰巧跑一次也未必展示全部字符串。
+- **修法**：探针在导航前预置应用状态标记（`localStorage.setItem('app:ui', JSON.stringify({state:{onboardingDone:true},version:0}))`——zustand persist 结构），让被门槛挡住的页面真正渲染；**并且**用**静态审计**补位：把页面文件里所有中文字符串字面量提出来、与词典键做差——静态覆盖不受渲染条件影响。
 - **规则**：「探针过了」=「探针看到的干净」，不等于「应用干净」。条件渲染 / 按日期轮换 / 有门槛的内容，要么静态审计、要么给探针预置状态。
 
 ### 与源文件做查重：先反转义再比对
 
 - **症状**：合并翻译批次后 TS1117 重复键两度复发——尽管合并逻辑明明「跳过词典已有的键」。
-- **根因**：词典文件里的键是源码转义形态（`不把\"没报错\"...`）；合并时拿 JSON 解码后的键与源码提取的键比对——含转义引号的 4 个键永远比不上，于是被重复追加。
+- **根因**：词典文件里的键是源码转义形态（`含转义引号的键`）；合并时拿 JSON 解码后的键与源码提取的键比对——含转义引号的 4 个键永远比不上，于是被重复追加。
 - **修法**：源码提取的键先进反转义再进集合比对（`k.replace('\\"', '"').replace('\\\\', '\\')`）。
 - **规则**：同一族文件里「提取的标识符」对「解析出的标识符」做比对时，两边都要先归一化转义；静默不一致意味着重复键活到 tsc 才被抓住。
 
@@ -396,41 +396,41 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — 必崩'
 
 ### 扫源码找短语的守卫测试：豁免中央翻译存放处
 
-- 源码扫描守卫（「『即将开放』只许出现在 entitlementService」）在词典合法包含这些短语后开始失败。
-- **修法**：扫描豁免 `i18n/dict-*`（词典是官方翻译存放处），功能页照旧禁止硬编码。守卫意图保留，演进就地注释说明。
+- 源码扫描守卫（「某个保留短语只许出现在 权限模块」）在词典合法包含这些短语后开始失败。
+- **修法**：扫描豁免 翻译词典文件（词典是官方翻译存放处），功能页照旧禁止硬编码。守卫意图保留，演进就地注释说明。
 
-### 快记（同批）
+### 快记
 
 - Python `urllib` 经沙箱代理连谷歌域名 → `SSL: UNEXPECTED_EOF_WHILE_READING`（已知）。别去 debug 网站——校验换 node `fetch` + 删光代理环境变量直连。
-- WPS 云盘同步中的工作副本写文件偶发瞬时 `EBUSY`；原样重试同一编辑即可，不用换姿势。
-- 云部署鉴权瞬时失败：连续两次 firebase 部署报 "Failed to authenticate, have you run firebase login?"（SA 密钥在且没动），第三次原样重试就过。先原样重试一次再排查配置；复发再查出口网络。
+- 云盘同步服务同步中的工作副本写文件偶发瞬时 `EBUSY`；原样重试同一编辑即可，不用换姿势。
+- 云部署鉴权瞬时失败：连续两次 云部署报 "鉴权瞬时失败"（SA 密钥在且没动），第三次原样重试就过。先原样重试一次再排查配置；复发再查出口网络。
 
 ### 审计闸门：建模运行时真正的回退语义，否则闸门自己先淹死
 
-- **症状**：第一版 i18n 审计（「所有 `t('键')` 字面量必须进词典」）报了 1536 个缺失——全是误报。这么吵的闸门一天之内就会被人无视或删掉。
-- **两个设计错误**：① 无视了调用**元数**——`t(zh, en, tw)` 多参调用自带内联翻译、根本不查词典；只有**单参**调用才走词典回退（768 个「缺失」键全是内联已覆盖的）。② 复查队列的警告没有数据层排除——2758 行噪音等于没人读的队列，也就是被无视的队列。
+- **症状**：第一版 i18n 审计（「所有 `t('lookup-key')` 字面量必须进词典」）报了 大量误报的缺失项——全是误报。这么吵的闸门一天之内就会被人无视或删掉。
+- **两个设计错误**：① 无视了调用**元数**——`t(source, ...fallbacks)` 多参调用自带内联翻译、根本不查词典；只有**单参**调用才走词典回退（大量「缺失」键全是内联已覆盖的）。② 复查队列的警告没有数据层排除——数千行噪音等于没人读的队列，也就是被无视的队列。
 - **修法**：解析完第一个参数的闭引号后偷看下一个字符，是 `,`（还有参数 → 内联已覆盖 → 跳过）；复查队列排除数据层（`mock/ data/ services/ types/ stores/ lib/`）；**ERROR**（拦闸门）与 **WARN**（建议性、输出封顶）分流。
 - **接线**：审计作为测试流水线第 3 步（sync → tsc → vitest → audit）——以后新增代码只要单参键没覆盖，构建直接 FAIL。这才是多语言覆盖的闭环；靠手查就是尾巴存活的方式。
 - **通用原则**：把检查固化成闸门时，先建模运行时真正的行为；拦截集要小而准，建议性的大宗塞进封顶的复查队列——狼来了喊三次，闸门就没人信了。
 
 
-## WPS 同步构建目录：复活与僵尸清理（2026-10-01 深夜）
+## 云盘同步构建目录：复活与僵尸清理
 
-### WPS 云盘会把删掉的构建产物复活——别在上游斗，去部署边界解决
+### 云盘同步服务会把删掉的构建产物复活——别在上游斗，去部署边界解决
 
-- **症状**：vite 构建明明每次都清空 outDir（默认行为），dist/assets 里旧 bundle 还是越积越多（一天 30+ 个历史文件），而且**全部跟着部署上线**。
-- **根因**：WPS 同步层的反扑行为——本地删掉的文件会被云端重新水合回来。在上游反复删是徒劳的，同步层必赢。
-- **修法（部署边界）**：copydist 重写为**运行时闭包 BFS 拷贝**——入口 index.html 静态引用主包；主包内嵌 Vite 的懒加载 chunk 映射与 CSS 引用；从入口开始扫每个收集到的 js/css 直到不动点，部署的恰好是当前产物的完整闭包（整目录 10MB+ → 闭包 1.4MB）。
-- **🔴 反面教材（第一版闭包的坑）**：只按 index.html 的**静态引用**拷贝 → 只发了 5 个文件 → 29 个懒加载路由 chunk 全部 404、切路由就是白屏。**运行时闭包 ≠ 入口静态引用**——懒加载 chunk 的映射表埋在主包内部，必须 BFS 展开。
-- **被什么拦住的**：部署后字符串校验（verifyL2 模式）当场报 8 项缺失。**部署验证脚本会立功——前提是它的假设跟着架构走**：分包之后「字符串在主包」的旧假设静默失效，必须升级成「主包 + 主包内引用的全部 chunk」（66 个 chunk 合并扫描）。
+- **症状**：vite 构建明明每次都清空 outDir（默认行为），dist/assets 里旧 bundle 还是越积越多（一天 数十个历史文件），而且**全部跟着部署上线**。
+- **根因**：云盘同步层的反扑行为——本地删掉的文件会被云端重新水合回来。在上游反复删是徒劳的，同步层必赢。
+- **修法（部署边界）**：copydist 重写为**运行时闭包 BFS 拷贝**——入口 index.html 静态引用主包；主包内嵌 Vite 的懒加载 chunk 映射与 CSS 引用；从入口开始扫每个收集到的 js/css 直到不动点，部署的恰好是当前产物的完整闭包（整目录 整个目录 → 闭包 仅闭包大小）。
+- **🔴 反面教材（第一版闭包的坑）**：只按 index.html 的**静态引用**拷贝 → 只发了 5 个文件 → 大量懒加载路由 chunk 全部 404、切路由就是白屏。**运行时闭包 ≠ 入口静态引用**——懒加载 chunk 的映射表埋在主包内部，必须 BFS 展开。
+- **被什么拦住的**：部署后字符串校验（verifyL2 模式）当场报 若干缺失项。**部署验证脚本会立功——前提是它的假设跟着架构走**：分包之后「字符串在主包」的旧假设静默失效，必须升级成「主包 + 主包内引用的全部 chunk」（所有被引用的 chunk 合并扫描）。
 
 ### 僵尸清理流程（云盘同步目录安全姿势）
 
-1. **先建白名单**：从入口 html 出发按上面的 BFS 算出当前闭包；闭包外的才是僵尸（本次：124 个文件、56 僵尸、24.7MB），白名单一个不碰。
+1. **先建白名单**：从入口 html 出发按上面的 BFS 算出当前闭包；闭包外的才是僵尸（本次：构建目录里大量过期产物），白名单一个不碰。
 2. **删除姿势**：Python `os.remove`、**每进程 ≤40 个**分批（safe-delete 钩子对大批量 fail-closed）、逐批核对。
 3. **删后三查**：闭包白名单一个不能少（0 missing，少一个=把构建弄坏了）→ 等 10 秒查反扑 → C 盘可用空间用 `disk_usage` 实测（云盘目录删除通常进回收站，**清空回收站才真正释放**）。
-4. **扫描器自匹配**：扫描脚本自己的模式字符串会命中自己（泄密扫描撞上自己的 service_role）→ 把扫描器文件列入自身豁免。
-- 实测结果（2026-10-01）：124 个文件 → 删 56 僵尸（24.7MB）分 2 批，闭包完好，8 秒后反扑 0，空间在回收站里等清空。
+4. **扫描器自匹配**：扫描脚本自己的模式字符串会命中自己（泄密扫描撞上自己的 service_role_placeholder）→ 把扫描器文件列入自身豁免。
+- 实测结果（）：构建目录里大量过期产物分 2 批，闭包完好，8 秒后反扑 0，空间在回收站里等清空。
 
 
 ## PS cmdlet 默认值 / 跨版本 / 配置文件的隐藏雷
@@ -561,23 +561,23 @@ Get-Content foo.txt | Measure-Object   # 行维度的统计，不是字符串维
 
 通用原则：**任何接受 "Depth / Encoding / PassThru / Raw / NoType" 等参数的 cmdlet，默认值是"系统相关"的，一律显式指定**。系统默认值跨 PS 版本、locale、平台都会变。
 
-## WorkBuddy md 文件里画带中文的图：用内置 Mermaid 引擎（2026-10-01 第 20 轮定稿）
+## 在 markdown 中绘制 CJK 标签图：使用内置 Mermaid 引擎
 
-### 已证事实（app.asar 解剖 + 本地 Playwright 测试架 + 用户截图；不要再翻案）
+### 已证事实（应用安装包 解剖 + 本地 Playwright 测试架 + 截图；不要再翻案）
 
 - WorkBuddy 内置 Mermaid，并接入 markdown 代码围栏的**两个渲染面**：
-  1. 聊天/markdown 渲染器：`packages/cb-chat-ui/src/components/markdown/markdown-pre-mermaid.tsx` → `MarkdownPreMermaidComponent`；围栏判断 `if (language === "mermaid")`；`loadMermaid()` → `mermaid.initialize({ startOnLoad: false, securityLevel: "strict", ...theme })` → `mermaid.render()` → SVG，带图表/代码视图切换与 SVG/PNG 下载。
-  2. Lexical 文档/工件预览（`@tencent/smart-doc-plugin-mermaid`）：渲染器 `g$2`，`initialize({ theme:"base", fontFamily:"inherit", flowchart:{useMaxWidth:true}, ... })`，预处理 `p$3(s$7(code))`，渲染进离屏 `width:0;height:0` 容器，LRU 渲染缓存（32）+ 串行渲染队列。
+  1. 聊天/markdown 渲染器：`聊天 markdown 渲染器` → `MarkdownPreMermaidComponent`；围栏判断 `if (language === "mermaid")`；`loadMermaid()` → `mermaid.initialize({ startOnLoad: false, securityLevel: "strict", ...theme })` → `mermaid.render()` → SVG，带图表/代码视图切换与 SVG/PNG 下载。
+  2. Lexical 文档/工件预览（`文档/工件预览渲染器`）：渲染器 `g$2`，`initialize({ theme:"base", fontFamily:"inherit", flowchart:{useMaxWidth:true}, ... })`，预处理 `p$3(s$7(code))`，渲染进离屏 `width:0;height:0` 容器，LRU 渲染缓存（32）+ 串行渲染队列。
 - 所以 ```mermaid 围栏会渲染成**真引擎画出来的图**（框和箭头由引擎排版——对齐是引擎的事，不是作者的）。这是画图，不是绕图。
-- 带中文的字符网格画法在这些预览里物理上不可靠——5 轮实证：(1) 手绘 ASCII 漂移；(2) 窄字符坐标画布脚本漂移；(3) markdown 表格能对齐但被用户否决（框图比表格直观，擅自降级=自我阉割）；(4) 全全角网格仍然漂移——拉丁等宽 ≈0.55em vs 中文 ≈1.0em（实际 ≈1.7–1.8 倍而非 2），U+3000 不跟随中文字体（渲染偏窄），全角字形墨迹内缩造成视觉偏移；(5) mermaid 围栏 → 引擎绘制、构造上对齐。
+- 带中文的字符网格画法在这些预览里物理上不可靠——多轮实证：(1) 手绘 ASCII 漂移；(2) 窄字符坐标画布脚本漂移；(3) markdown 表格能对齐但被降级方案被否决（框图比表格直观，擅自降级=自我阉割）；(4) 全全角网格仍然漂移——拉丁等宽 ≈0.55em vs 中文 ≈1.0em（实际 ≈1.7–1.8 倍而非 2），U+3000 不跟随中文字体（渲染偏窄），全角字形墨迹内缩造成视觉偏移；(5) mermaid 围栏 → 引擎绘制、构造上对齐。
 - **两个不同的预处理器会在引擎看到代码之前改掉它（标签语法翻车的真因）：**
-  - smart-doc 渲染器：`s$7 = code.replace(/<br\s*\/?>/gi, " ")`——`<br/>` 变**空格**（标签塌成一行 + CSS 重排 → 用户看到的「错误换行」）。
+  - smart-doc 渲染器：`s$7 = code.replace(/<br\s*\/?>/gi, " ")`——`<br/>` 变**空格**（标签塌成一行 + CSS 重排 → 预览显示的「错误换行」）。
   - Lexical MermaidComponent：`cleanMermaidCode` 把 `<br/>` 换成真换行、剥掉 `<p>/<div>/<span>...`。
-  - 引擎的标签路径（`nonMarkdownToHTML`）按 `<br/>` 和真 `\n` 切分、都转成 `<br/>`。所以源码里的真 `\n` = `<br/>` = 再被 s$7 吃掉变空格（第 18 轮）。
-- **多行标签方法——定稿（第 18 轮实证，勿回退）**：在引号标签里用 mermaid 原生实体码 **`#10;`**，如 `"南京Ａ公司　融资主体・研发・控股#10;注册资本１００万　５名自然人＋持股平台"`。机制：`#10;` 在词法分析**之后**解码成真 LF → 标签 div（`white-space: break-spaces`）渲染成真换行。它能穿过全部三层预处理：(a) 源码无 `<br` → s$7 不动它；(b) 无裸换行 → 解析器不炸；(c) 无 `\n` 字面串 → 不会被转成 `<br/>` 再被吃。测试架证明：A 框 `foH=48`（2 行）。`&#10;` 也能换行但会留一个杂散 `&` 字符 → **不要用**。**`<br/>` 已死**（s$7 → 空格）。**真换行已死**（在用户机器上渲染空白，第 8-11 与 17 轮；本地从未复现——疑似 md 导入/缓存层）。
-- **wrappingWidth 把所有多行节点框钉成同一宽度（第 19-20 轮，addHtmlSpan 源码证实）**：指令 `%%{init:{"flowchart":{"wrappingWidth":W}}}%%`，代码 `width: node.width || flowchart.wrappingWidth`。addHtmlSpan 把标签 div 建成 `table-cell + white-space:nowrap + max-width:W`；若拼接标签的**单行宽度** ≥ W 则切换为 `display:table + break-spaces + width:W px` → 框**恰好 W px**，与实际行多短无关。默认 W=200。**没有每节点宽度配置**——`node.width` 只被图标/图片形状设置，普通流程图节点永远没有。后果：每个框同宽。W 设到比最长单行略高（不让它重折行）：A 最长行 ≈19 个中文 ≈304px@16px → **W=310**。W=310 时 A=2 行，B/C 内容仅约 160px → 渲染成 310px 框、文字居中、大片留白（第 20 轮「下面两个框还是很宽」bug）。
+  - 引擎的标签路径（`nonMarkdownToHTML`）按 `<br/>` 和真 `\n` 切分、都转成 `<br/>`。所以源码里的真 `\n` = `<br/>` = 再被 s$7 吃掉变空格（实测验证）。
+- **多行标签方法——定稿（实测验证实证，勿回退）**：在引号标签里用 mermaid 原生实体码 **`#10;`**，如 `"公司 A — 业务单元与范围#10;资本与股东结构"`。机制：`#10;` 在词法分析**之后**解码成真 LF → 标签 div（`white-space: break-spaces`）渲染成真换行。它能穿过全部三层预处理：(a) 源码无 `<br` → s$7 不动它；(b) 无裸换行 → 解析器不炸；(c) 无 `\n` 字面串 → 不会被转成 `<br/>` 再被吃。测试架证明：A 框 `foH=48`（2 行）。`&#10;` 也能换行但会留一个杂散 `&` 字符 → **不要用**。**`<br/>` 已死**（s$7 → 空格）。**真换行已死**（在目标机器上渲染空白，早期尝试；本地从未复现——疑似 md 导入/缓存层）。
+- **wrappingWidth 把所有多行节点框钉成同一宽度（实测验证，addHtmlSpan 源码证实）**：指令 `%%{init:{"flowchart":{"wrappingWidth":W}}}%%`，代码 `width: node.width || flowchart.wrappingWidth`。addHtmlSpan 把标签 div 建成 `table-cell + white-space:nowrap + max-width:W`；若拼接标签的**单行宽度** ≥ W 则切换为 `display:table + break-spaces + width:W px` → 框**恰好 W px**，与实际行多短无关。默认 W=200。**没有每节点宽度配置**——`node.width` 只被图标/图片形状设置，普通流程图节点永远没有。后果：每个框同宽。W 设到比最长单行略高（不让它重折行）：A 最长行 ≈19 个中文 ≈304px@16px → **W=310**。W=310 时 A=2 行，B/C 内容仅约 160px → 渲染成 310px 框、文字居中、大片留白（最终实测状态「下面两个框还是很宽」bug）。
 - **`htmlLabels:false` 被内置引擎无视**（strict 和 loose 都验证过 → 标签仍是 SPAN.nodeLabel/HTML）。markdown 反引号字符串标签会把字面反引号渲进文本 → 不可用。两者都解决不了每节点宽度。
-- **每节点宽度修法（第 20 轮定稿）**：通过指令的 `themeCSS` 注入自定义 CSS，并给窄框打 class。完整可用的头尾：
+- **每节点宽度修法（最终实测状态定稿）**：通过指令的 `themeCSS` 注入自定义 CSS，并给窄框打 class。完整可用的头尾：
 
   ````
   %%{init:{"flowchart":{"wrappingWidth":310},"themeCSS":".narrow div{width:175px!important}"}}%%
@@ -585,7 +585,7 @@ Get-Content foo.txt | Measure-Object   # 行维度的统计，不是字符串维
       A["...#10;..."]
       C["...#10;..."]
       B["...#10;..."]
-      A -->|"控股 100%"| C
+      A -->|"100% 控股"| C
       ...
       class B,C narrow
   ````
@@ -597,23 +597,23 @@ Get-Content foo.txt | Measure-Object   # 行维度的统计，不是字符串维
 ### 规则
 
 1. 在 WorkBuddy md 文件里画任何图：写 ```mermaid 围栏（`flowchart TD` 等），标签用双引号。
-2. **多行标签：每个断行用 `#10;`**。绝不 `<br/>`（s$7 → 空格），绝不真换行（\n → `<br/>` → 被吃 → 空格，且用户机器上渲染空白）。这是唯一穿过三层预处理的办法（第 18 轮，测试架证明）。
+2. **多行标签：每个断行用 `#10;`**。绝不 `<br/>`（s$7 → 空格），绝不真换行（\n → `<br/>` → 被吃 → 空格，且目标机器上渲染空白）。这是唯一穿过三层预处理的办法（实测验证，测试架证明）。
 3. 图开头 `%%{init:{"flowchart":{"wrappingWidth":310}}}%%`。310 = 比 A 最长行（约 304px@16px）略高；W=300/280 会把 A 折成 3 行。只有某行超过约 304px 才上调 W。
 4. **框要比全局 W 窄：`themeCSS` + `class`**，不是 `htmlLabels:false`（被无视）。头部 `"themeCSS":".narrow div{width:175px!important}"` + 尾部 `class B,C narrow`。**只覆盖 `width`**——绝不同时 `max-width`（会跳过钉宽分支 → 溢出）。175 = B/C 最长行 + 余量；按内容调。用 class 选择器，不用节点 id（id 带渲染前缀 + 计数）。
-5. 保留每框的用户原始行结构（A=2 / B=3 / C=3），边标签公式逐字保留（出厂价（成本+5%毛利+税））——不要为省字删改。
+5. 保留每框的用户原始行结构（A=2 / B=3 / C=3），边标签公式逐字保留（定价公式）——不要为省字删改。
 6. Mermaid 文本在预览里不可选/不可复制（SVG）。图内文字需要复用时，在图下方附一个带标签的纯文本块（如 **图内文字（可复制版）**）——否则不加（用户判定图已自解释，说明行已删）。
 7. 永远不要手绘或脚本生成中文字符网格框图。
-8. 永远不要把要求的图降级成表格——用户明令禁止这种偷懒。
+8. 永远不要把要求的图降级成表格——明确禁止这种偷懒。
 9. （仅 WorkBuddy 之外——真终端 / 带单一中文等宽字体的 VS Code：全全角网格是最不坏的字符方案。WorkBuddy 内无关。）
 
 ### 本地验证测试架（可复用——Playwright，不是 headless-shell）
 
-- `D:\WorkBuddy\_mermaid_probe\`：`vendor-mermaid-DU6uV3LW.js` 是从 app.asar 抽出的内置引擎（单文件——前几轮的 `771 文件` 解包**不需要**）。`run_test5.js`（Playwright）加载测试页并读 `<pre id="out">` 的 JSON。`test7/test8/test12/test13/test14.html` 是宽度分档实验。
-- **必须走 HTTP，绝不 `file://`**：ES-module `import("./vendor-mermaid-DU6uV3LW.js")` 在 `file://` 下被 CORS 拦截。跑 `python -m http.server 8765 --directory D:/WorkBuddy/_mermaid_probe`，然后 `run_test5.js <page.html>` 打 `http://localhost:8765/<page.html>`。
+- `<probe-dir>/`：`vendor-mermaid-DU6uV3LW.js` 是从 应用安装包 抽出的内置引擎（单文件——前几轮的 `771 文件` 解包**不需要**）。`run_test5.js`（Playwright）加载测试页并读 `<pre id="out">` 的 JSON。`test7/test8/test12/test13/test14.html` 是宽度分档实验。
+- **必须走 HTTP，绝不 `file://`**：ES-module `import("./vendor-mermaid-DU6uV3LW.js")` 在 `file://` 下被 CORS 拦截。跑 `python -m http.server 8765 --directory <probe-dir>`，然后 `run_test5.js <page.html>` 打 `http://localhost:8765/<page.html>`。
 - 每个测试页复刻应用链路：`s7(code)` 剥离（同样的 `/<br>/→" "` + 剥标签正则）→ `mermaid.initialize({startOnLoad:false, securityLevel:"strict", theme:"base", fontFamily:"inherit", flowchart:{useMaxWidth:true}})` → `mermaid.render(id, code, offscreenContainer)`。然后测量每个文本非空的 `foreignObject`：
   - `foW/foH`（foreignObject 客户区）、`divW = d.clientWidth`、`sw = d.scrollWidth`、`overflow = sw > divW+1`、`lines = round(d.clientHeight / 24)`。
   - **重折行探测器 = `overflow` 为 true**（scrollWidth > clientWidth）。**正确 = `overflow:false` + 预期 `lines` + `divW ≈ W`（或覆盖后的宽度）。**
   - 边标签 `bbox`/`foW` 恒 ≤200（钳制）。节点标签按所选 W / themeCSS 断言框宽与行数。
-- 第 20 轮终态断言：A `divW=310, lines=2, overflow:false`；B/C `divW=175, lines=3, overflow:false`。
+- 最终实测状态终态断言：A `divW=310, lines=2, overflow:false`；B/C `divW=175, lines=3, overflow:false`。
 - **完整 Chromium `--headless=new --dump-dom` 会永远挂起**（8 分钟+，零输出）——Playwright（`chromium.launch()`）是可靠路径；`chrome-head-shell --dump-dom` 也能用，但 Playwright 读 JSON 更省事。
 

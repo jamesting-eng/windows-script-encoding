@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows Script Encoding Iron Rules
-version: "1.5.1"
+version: "1.5.2"
 summary: Stop PowerShell parse-stage failures from recurring — write .ps1/.bat/.cmd with CRLF + pure ASCII and self-check before run; plus launcher/WPS/sandbox-test traps
 license: MIT
 tags:
@@ -47,18 +47,18 @@ read_when:
 3. **Self-check right after writing**: binary read-back (CRLF count, lone-LF count, ASCII read) —
    and **`tsc` immediately** after any edit to generated TS files (surgery, merge, value rewrite).
 4. **Shared files**: edits are serial / single-owner; parallel workers write disjoint outputs and
-   one owner merges — with **unescaped-vs-escaped normalized comparison** (see round-2 lesson).
+   one owner merges — with **unescaped-vs-escaped normalized comparison** (see normalization lesson).
 5. **Verification resolves the CURRENT artifact**: the bundle referenced by the current entry file,
    same-named sha256 both sides; a runtime probe only sees the app-state it can reach — complement
    with a static audit for gated/rotated content.
 6. **Fallback order**: PowerShell inline → `.ps1` with self-check → Python via Bash channel.
 
-## Trigger symptoms (the "I've hit this in multiple project chats" kind)
-- A PowerShell script fails with **"syntax error at parse stage"** on the user's machine, but the tool shows **no error message at all** — only exit 1
+## Trigger symptoms (the "this recurs in multiple project chats" kind)
+- A PowerShell script fails with **"syntax error at parse stage"** on the target machine, but the tool shows **no error message at all** — only exit 1
 - The same PowerShell code needs its "format" tweaked several times before it runs — usually an LF ↔ CRLF flip-flop
 - Historical lesson: Chinese comments inside `.bat` / `.cmd` → GBK mojibake → WSH accidentally executes `.js` → error `800A03EA` (already in long-term memory, write pure ASCII). `.ps1` is a new pit with similar symptoms but a different root cause
 
-## Root cause (empirically confirmed 2026-09-06)
+## Root cause (empirically confirmed)
 
 1. **Line endings**: Windows PowerShell 5.1 fails at the **parse stage on LF-only `.ps1` files** — not a logic error, not an encoding error, just a parse failure.
    - Proof: the same `.ps1` changed from LF-only to CRLF went from "exit 1 + no message" to running immediately. An existing legacy `.ps1` may be LF but stable in production; PS actually accepts both, but **new scripts should standardize on CRLF** (verified by comparison).
@@ -83,7 +83,7 @@ read_when:
 
 ### Self-check immediately after writing (non-skippable)
 ```python
-raw = open(path, 'rb').read()
+raw = open(path, 'rb').read
 assert b'\r\n' in raw, 'CRLF MISSING — will fail'
 assert raw.count(b'\n') - raw.count(b'\r\n') == 0, 'LF-only lines detected — will fail'
 assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
@@ -132,7 +132,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 - **Symptom**: Bash rejects a `curl` / `python` invocation with:
   `Command blocked for security: Invoking PowerShell from Bash bypasses PowerShell security checks; use the PowerShell tool instead`
 - **When it triggers**: any Bash command line whose *literal text* contains "PowerShell" — even inside a `--description`, JSON body, Python docstring, or `--data` argument
-- **Why this hit me**: had to `POST` a GitHub repo body containing the description "PowerShell parse-stage failures" — the entire `curl` invocation got rejected. Cost one iteration
+- **Why this happens**: had to `POST` a GitHub repo body containing the description "PowerShell parse-stage failures" — the entire `curl` invocation got rejected. Costs one iteration
 - **Workarounds (in order of preference)**:
   1. **Move the offending text into a file** (Write tool), then reference it from the command line: `curl --data @/path/to/body.json` or `python -c "import json; print(open('/path/to/body.json').read())"`
   2. **Run a Python runner script** that loads the body from disk and invokes the API — keeps the Bash command line keyword-free
@@ -173,7 +173,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   ```bat
   cmd /k "C:\path\to\node.exe server.js"
   ```
-- **Bonus**: set a custom title with `title Amazon-Monitor-Backend` so the user can tell which window is which when several are open.
+- **Bonus**: set a custom title with `title My-App-Server` so the user can tell which window is which when several are open.
 
 ### Nested quotes in .bat files break CMD parsing (split into two files)
 
@@ -228,7 +228,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   - Print an **actionable** message (which machine, which runtime, the expected path) so the user can fix it in one step instead of debugging a stack trace.
 - **General principle**: fail fast, fail loud, fail with a next step. A script that dies 40 lines deep with exit 1 is a black box; a script that checks its prerequisites first is self-diagnosing.
 
-## Launcher, WPS-cloud and sandbox-test traps (2026-09-29 batch — all hit in one day)
+## Launcher, cloud-sync and sandbox-test traps
 
 ### Batch "window flashes closed instantly with only the banner shown"
 
@@ -242,7 +242,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
      `if` is a one-liner or a `goto`. This parses correctly even under LF abuse.
   2. **CRLF is still mandatory** — convert after writing and **verify by binary read**
      (`data.count(b'\r\n')`, count lone `b'\n'`), because text-mode reads translate CRLF→LF and will
-     give you a **false negative** on the check itself (hit this exact false negative).
+     give you a **false negative** on the check itself (this exact false negative occurs).
 - **Note**: the Edit/Write tools emit LF. Writing a .bat/.cmd with them is fine *if* you post-convert
   to CRLF + binary-verify; but per the iron rules above, Python binary write with forced CRLF is the
   one-step safe path.
@@ -279,7 +279,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   resolve Node at runtime (system `node` → managed install under the user profile); all paths
   relative to the script itself; the repo (including the built `dist/`) is distributed by the sync
   layer, so the same relative layout works on every machine.
-- Test switch: give the script an env kill-switch like `ORBIT_DRY=1` that prints the actions instead
+- Test switch: give the script an env kill-switch like `DRY_RUN=1` that prints the actions instead
   of executing — lets you parse-verify the whole script end-to-end without spawning windows.
 
 ### Testing a .bat under stream redirection triggers "input redirection not supported"
@@ -314,14 +314,14 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   then run a Python transform (CRLF conversion / encoding check) whose command line contains no
   Windows-script keywords. Batch syntax in a heredoc body is enough to trip the scanner.
 
-### Silent exit-49: the word `copy` anywhere in a Bash command blocks it with ZERO output (2026-10-01)
+### Silent exit-49: the word `copy` anywhere in a Bash command blocks it with ZERO output
 
 - **Symptom**: command exits code 49 with empty stdout AND empty stderr — no "blocked" message at all. Looks like a mysterious crash; is actually the security scanner.
-- **Confirmed triggers (probed 2026-10-01)**: the literal substring `copy`/`Copy` anywhere in the command text — blocked all three: a python `-c` with `print('copy Copy viewMode onDownload')`, a regex `re.finditer(rb'viewMode|onDownload|copy|Copy')`, and a heredoc whose print message said `"patched: ... copyable text companion"` (the word "copyable" contains `copy`). Control probes ran fine: same-shaped commands without the word, and `echo '<br/>'` (a br tag is NOT a trigger).
+- **Confirmed triggers (probed )**: the literal substring `copy`/`Copy` anywhere in the command text — blocked all three: a python `-c` with `print('copy Copy viewMode onDownload')`, a regex `re.finditer(rb'viewMode|onDownload|copy|Copy')`, and a heredoc whose print message said `"patched: ... copyable text companion"` (the word "copyable" contains `copy`). Control probes ran fine: same-shaped commands without the word, and `echo '<br/>'` (a br tag is NOT a trigger).
 - **Why it's nastier than the "PowerShell" literal block**: zero feedback — no error text anywhere. Only symptom is exit 49.
 - **Fix**: audit the FULL command text for Windows-command keywords hiding inside WORDS (`copyable`, `Copy2`, `recycle`...), quoted strings, regexes, and print/log messages — not just shell syntax. Then reword ("duplicate"/"clone"), or Write the content to a file and run it by path, or use the PowerShell tool channel (unaffected).
 
-### N20 follow-ups (same batch, learned while shipping S1–S7)
+### Follow-up lessons from the same delivery period
 
 **Edit-tool block excision on TSX/TS — run tsc immediately after**
 
@@ -331,7 +331,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 - **Rule**: after any large block excision with the Edit tool, **run `tsc --noEmit` immediately**.
   The type-checker is the cheapest proof the surgery was clean; never batch multiple surgeries
   before checking. (Hit twice on the same file today.)
-- **Extended (2026-09-30)**: this applies to **full-file rewrites via the Write tool** too — a
+- **Extended ()**: this applies to **full-file rewrites via the Write tool** too — a
   rewrite can silently drop every import statement (cost: a deployed page went fully blank).
   The synced-mirror tsc gate is the net; also grep the rewritten file head for `import` lines.
 
@@ -346,7 +346,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 
 **Flipping a capability flag → grep and sync every guard test that asserts it**
 
-- **Symptom**: flipping `report.export` / `report.whitelabel` entitlements failed **three** guard
+- **Symptom**: flipping feature flags entitlements failed **three** guard
   tests (full-matrix rows, a "all four flags false" sanctity loop, a BillingPage chip-count
   assertion) plus an `upgradeTo` chain expectation.
 - **Rule**: entitlement/feature flags are asserted in **multiple** guard tests (matrix rows,
@@ -357,7 +357,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 
 **Multi-mode scripts: every real-run exit path must pause (dry-run exits stay silent)**
 
-- **Symptom**: a migration script with a dry-run switch (`ORBIT_DRY=1`) ran fine and did its job —
+- **Symptom**: a migration script with a dry-run switch (`DRY_RUN=1`) ran fine and did its job —
   but the window closed itself the moment it finished. The user never saw "MIGRATION COMPLETE"
   and had to screenshot mid-run to see anything.
 - **Root cause**: the success path routed to the **shared exit label** `:dry_end`, which was
@@ -368,8 +368,8 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   as mode-conditional:
   ```bat
   :end
-  if "%ORBIT_DRY%"=="1" echo [DRY] Dry run finished - nothing was executed.
-  if "%ORBIT_DRY%"=="1" exit /b 0
+  if "%DRY_RUN%"=="1" echo [DRY] Dry run finished - nothing was executed.
+  if "%DRY_RUN%"=="1" exit /b 0
   echo.
   pause
   exit /b 0
@@ -383,7 +383,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   dropped) — yet the gate passed 1000+ tests green. The deployed page was blank
   (runtime `ReferenceError: Link is not defined`).
 - **Root cause**: the full test gate (`runtest.py`) runs against the **D: mirror**
-  (`D:\WorkBuddy\orbit-ops-test`). Running it directly after editing C: files does
+  (`a mirrored workspace on a secondary drive`). Running it directly after editing C: files does
   NOT sync the workspace — the gate tested the **stale mirror**, not the changed code.
 - **Rule**: after changing source files, **sync first, then gate** — use
   `sync_and_verify.py` (sync + tsc + vitest in one step, with a private Temp dir),
@@ -394,7 +394,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 
 ### Deployed-page runtime probe: 1000 unit tests cannot catch a broken deploy
 
-- **Symptom**: the deployed changelog page was blank in two browsers even after a
+- **Symptom**: the deployed a deployed page was blank in two browsers even after a
   hard refresh; all unit tests green; every asset byte-identical on the server.
 - **Why unit tests cannot catch it**: they render components in jsdom. The
   deployed bundle fails differently in a real browser — module loading, browser-only
@@ -407,12 +407,12 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 - **Signature worth memorizing**: `X is not defined` at render time = a JSX
   identifier lost its import (full-file rewrite casualty).
 
-## i18n batch lessons (2026-09-30 batch — full-site trilingualization)
+## Internationalization and text-refactor traps
 
 ### Parallel workers editing the same shared file corrupt it (dict files)
 
 - **Symptom**: after N parallel workers each "appended entries" to the same
-  `dict-en.ts` / `dict-tw.ts`, tsc reported duplicate keys (TS1117), a dangling
+  translation files, tsc reported duplicate keys (TS1117), a dangling
   `};`, and unterminated string literals — the file structure was shredded.
 - **Why**: parallel workers read the same stale snapshot, then each wrote their
   own version back; last-writer-wins plus interleaved appends = duplicate keys
@@ -430,7 +430,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 ### i18n wrapping breaks `getByText('exact string')` test assertions
 
 - **Symptom**: after wrapping page copy with `t(...)`, tests that had passed
-  for weeks started failing at `getByText('品类报告（未归属项目）')` — the
+  for weeks started failing at `getByText('exact text')` — the
   string was still visible on the page, but the matcher found nothing (or a
   pile of duplicates).
 - **Why**: i18n splits one text node into multiple React text nodes
@@ -438,7 +438,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   by default, so the "same visible string" no longer exists as one node.
 - **Fix**: anchor on the stable container, not the exact text node:
   ```ts
-  screen.getAllByText('品类报告（未归属项目）', { exact: false })
+  screen.getAllByText('exact text', { exact: false })
     .map(e => e.closest('div.bg-white'))
     .find(x => x !== null)
   ```
@@ -465,32 +465,32 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   (`io.open(path, encoding='ascii')`) applies to these files too — same as
   .bat.
 
-### Central dict + single-param t(): decouple "wrapping" from "translating"
+### Central dictionary + single-param t(): decouple "wrapping" from "translating"
 
-- **Pattern** (what made the 4-parallel-worker i18n batch survivable):
-  `t(zh, en?, tw?)` uses the **inline Chinese string as the key**; English and
-  Traditional entries live in central `dict-en.ts` / `dict-tw.ts` and are
+- **Pattern** (what made parallel translation wrapping survivable):
+  `t(source, ...fallbacks)` uses the **inline Chinese string as the key**; English and
+  Traditional entries live in central translation files and are
   looked up as a fallback at render time.
-- **Why it matters**: workers can wrap thousands of strings as `t('中文')` in
+- **Why it matters**: workers can wrap thousands of strings as `t('source-text')` in
   parallel (no shared-file writes); translation then proceeds incrementally in
-  the central dict; a missing dict entry falls back to Chinese instead of
+  the central dictionary; a missing dict entry falls back to Chinese instead of
   crashing.
 - **Rule**: when splitting a large mechanical refactor across parallel
   workers, design the interface so each worker's write set is disjoint
   (per-page files parallelize fine; shared dicts do NOT). The shared artifact
   is merged by one owner at the end.
 
-## i18n full-coverage batch, round 2 (2026-09-30 night → 10-01)
+## More internationalization traps: storage cleanup and verification
 
 ### The app's own bulk storage cleanup eats preferences sharing the prefix
 
 - **Symptom**: language switching "always reverted to Chinese". Probe diagnosis:
-  `localStorage.getItem('orbit:lang')` → null right after boot, even though the
+  `localStorage.getItem('app:lang')` → null right after boot, even though the
   probe set it before any app code ran.
-- **Root cause**: the app's `resetAll()` sweeps every key with the `orbit:` prefix
+- **Root cause**: the app's `resetAll()` sweeps every key with the `app:` prefix
   (data buckets) on first-boot reseed / schema bump — and the language pref
-  `orbit:lang` shares that prefix. The app deleted its own user preference.
-- **Fix**: exempt non-data keys in the sweep: `if (k === 'orbit:lang') continue;`.
+  `app:lang` shares that prefix. The app deleted its own user preference.
+- **Fix**: exempt non-data keys in the sweep: `if (k === 'app:lang') continue;`.
 - **General principle**: prefix-based bulk cleanup eats ANY key sharing the
   prefix. UI preferences are not data buckets — exempt them explicitly or move
   them outside the swept namespace.
@@ -498,13 +498,13 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 ### A single-pass runtime probe only sees the app-state it can reach
 
 - **Symptom**: probe reported 0 residual Chinese across all routes; the user's
-  screenshot still showed untranslated strings on the workbench home.
+  screenshot still showed untranslated strings on the main dashboard.
 - **Why (two layers)**: ① first-launch logic redirected `/app` to the onboarding
-  wizard — the probe (fresh context) NEVER rendered the workbench home; ② the
+  wizard — the probe (fresh context) NEVER rendered the main dashboard; ② the
   missed content was date-rotated mock data (daily-work items chosen by current
   date), so even a lucky run may not display every string.
 - **Fix**: pre-seed app-state flags before navigation
-  (`localStorage.setItem('orbit:ui', JSON.stringify({state:{onboardingDone:true},version:0}))`
+  (`localStorage.setItem('app:ui', JSON.stringify({state:{onboardingDone:true},version:0}))`
   — zustand persist shape) so gated pages actually render; AND complement the
   runtime probe with a **static audit**: extract every CJK string literal from a
   page file and diff against the dict keys — static coverage is immune to
@@ -517,7 +517,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 
 - **Symptom**: TS1117 duplicate keys returned TWICE after merging translation
   batches, even though the merge skipped keys "already in the dict".
-- **Root cause**: the dict file stores keys source-escaped (`不把\"没报错\"...`);
+- **Root cause**: the dict file stores keys source-escaped (`escaped-quote keys`);
   the merge compared JSON-decoded keys against source-extracted keys — the 4
   keys containing escaped quotes never matched, so they were appended again.
 - **Fix**: unescape source-extracted keys before the set intersection
@@ -549,31 +549,31 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 
 ### Guard tests that scan source for phrases: exempt the central translation store
 
-- Source-scan guards ("『即将开放』 may only appear in entitlementService") started
+- Source-scan guards ("a reserved phrase may only appear in the entitlement module") started
   failing once the i18n dict legitimately contained those phrases as entries.
-- **Fix**: exempt `i18n/dict-*` from the scan (the dict is the sanctioned
+- **Fix**: exempt translation dictionary files from the scan (the dict is the sanctioned
   translation store) while keeping the ban for feature pages. Guard intent is
   preserved; the evolution is documented in-place with a comment.
 
-### Quick hits (same batch)
+### Quick hits
 
 - Python `urllib` through the sandbox proxy → `SSL: UNEXPECTED_EOF_WHILE_READING`
   on Google domains (known). Don't debug the site — switch to node `fetch` with
   all proxy env vars deleted for verification.
-- WPS cloud-synced working copies throw transient `EBUSY` on file writes; retry
+- cloud-synced working copies throw transient `EBUSY` on file writes; retry
   the same edit after a beat instead of switching approach.
-- Transient cloud-deploy auth failure: two consecutive firebase deploys died with "Failed to authenticate, have you run firebase login?" (SA key present and untouched), the third identical run passed. Retry once before touching config; if it recurs, suspect egress, not credentials.
+- Transient cloud-deploy auth failure: two consecutive cloud deploy runs died with "a transient auth failure" (SA key present and untouched), the third identical retry passed. Retry once before touching config; if it recurs, suspect egress, not credentials.
 
 ### Audit gates: model the actual runtime fallback semantics, or the gate drowns
 
-- **Symptom**: the first i18n audit ("every `t('key')` literal must exist in the
-  dict") reported 1536 missing keys — ALL false positives. A gate that loud gets
+- **Symptom**: the first i18n audit ("every `t('lookup-key')` literal must exist in the
+  dict") reported a large number of false-positive missing keys — ALL false positives. A gate that loud gets
   ignored or deleted within a day.
-- **Two design errors**: ① it ignored the call ARITY — `t(zh, en, tw)` multi-param
+- **Two design errors**: ① it ignored the call ARITY — `t(source, ...fallbacks)` multi-param
   calls are self-contained inline translations and never touch the dict; only
-  **single-param** calls fall through to the dict (768 of the "missing" keys were
+  **single-param** calls fall through to the dict (many of the "missing" keys were
   inline-covered). ② the review-queue warnings had no data-layer exclusions —
-  2758 lines of noise is an unreadable queue, i.e. an ignored queue.
+  thousands of lines of noise is an unreadable queue, i.e. an ignored queue.
 - **Fix**: after the first argument's closing quote, peek for `,` (more args →
   inline-covered → skip); exclude data layers (`mock/ data/ services/ types/
   stores/ lib/`) from the CJK review queue; split **ERROR** (blocks the gate)
@@ -587,31 +587,31 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   capped review queue — a gate that cries wolf trains everyone to ignore it.
 
 
-## WPS-synced build dirs: resurrection & zombie cleanup (2026-10-01 night)
+## Cloud-sync build directories: resurrection and zombie cleanup
 
-### WPS cloud resurrects deleted build artifacts — fight it at the deploy boundary
+### Cloud-sync layers resurrect deleted build artifacts — fight it at the deploy boundary
 
 - **Symptom**: vite build empties `outDir` on every run (default behavior), yet
-  `dist/assets` kept ACCUMULATING old bundles — 30+ historical files after one
+  `dist/assets` kept ACCUMULATING old bundles — dozens of historical files after one
   day of builds — and every one of them shipped to production.
-- **Root cause**: the WPS sync layer's resurrection behavior — files deleted
+- **Root cause**: the cloud-sync layer's resurrection behavior — files deleted
   locally get rehydrated from the cloud. Deleting upstream is futile; the sync
   layer always wins that fight.
 - **Fix (deploy boundary)**: rewrite the staging copy as a **runtime-closure BFS
   copy** — the entry index.html statically references the main js; the main js
   embeds Vite's lazy-chunk map AND css links; BFS from the entry through every
   collected js/css until fixpoint; ship exactly that closure (was 10MB+ of
-  folder, now 1.4MB of closure).
+  folder, now only the closure).
 - **RED anti-lesson (the first closure attempt's bug)**: "closure = the entry
-  html's static references" shipped only 5 files, so all 29 lazy route chunks
+  html's static references" shipped only 5 files, so all many lazy route chunks
   404'd and every route navigation was a white screen. **Runtime closure is not
   the entry's static refs** — the lazy-chunk map lives INSIDE the main bundle
   and must be BFS-expanded.
 - **What caught it**: post-deploy string verification (verifyL2 pattern) flagged
-  8 missing strings immediately. Deployment verification earns its keep, but its
+  several missing strings immediately. Deployment verification earns its keep, but its
   assumptions must follow the architecture: after code splitting, "string is in
   the main bundle" silently went false-negative; the check had to be upgraded to
-  "main bundle + every chunk referenced from it" (66 chunks merged).
+  "main bundle + every chunk referenced from it" (all referenced chunks merged).
 
 ### Zombie cleanup procedure (cloud-synced build dirs, safe recipe)
 
@@ -624,9 +624,9 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
    measured with disk_usage (synced-dir deletions usually land in the Recycle
    Bin; space frees only after emptying it).
 4. **Scanner self-match**: a scanner's own pattern strings match themselves (the
-   secret scan hit its own service_role literal) — put the scanner file on its
+   secret scan hit its own service_role_placeholder literal) — put the scanner file on its
    own exclusion list.
-- Field result (2026-10-01): 124 files -> 56 zombies (24.7MB) removed in 2
+- Field result : a large build directory with many stale artifacts removed in 2
   batches, closure intact, 0 resurrection after 8s, recycle bin holds the space
   until emptied.
 
@@ -649,8 +649,8 @@ Default encoding matrix:
 | `Get-Content -Encoding Default` | system codepage (GBK)       | UTF-8 (no BOM)     | UTF-8 (no BOM)     |
 
 Symptoms:
-- "I wrote UTF-8 but the file came out as GBK" -> PS 5.1 + `Out-File -Encoding Default`
-- "I wrote ASCII but the file came out as UTF-16 with weird BOM bytes" -> PS 5.1 + `Set-Content -Encoding Default`
+- "you write UTF-8 but the file came out as GBK" -> PS 5.1 + `Out-File -Encoding Default`
+- "you write ASCII but the file came out as UTF-16 with weird BOM bytes" -> PS 5.1 + `Set-Content -Encoding Default`
 - "My CSV has `?` for all Chinese characters" -> PS 5.1 + `Export-Csv -Encoding Default` (default is ASCII in 5.1!)
 
 Fix: always specify encoding explicitly. For UTF-8 portable output:
@@ -760,30 +760,30 @@ If you're parsing nested JSON, always pass `-Depth 10` (or higher) explicitly. D
 General principle: **for any cmdlet that takes a "Depth / Encoding / PassThru / Raw / NoType" parameter that defaults to "system-dependent", set it explicitly.** System defaults change across PS versions, locales, and platforms.
 
 
-## Diagrams with Chinese in WorkBuddy md files: use the built-in Mermaid engine (2026-10-01 round 20 — final)
+## Diagrams with CJK labels in markdown: use the built-in Mermaid engine
 
-### Verified facts (app.asar dissection + local Playwright harness + user screenshots; do not re-litigate)
+### Verified facts (the application bundle dissection + local Playwright harness + screenshots; do not re-litigate)
 
 - WorkBuddy bundles Mermaid and wires it into markdown code fences in TWO surfaces:
-  1. chat/markdown renderer: `packages/cb-chat-ui/src/components/markdown/markdown-pre-mermaid.tsx` → `MarkdownPreMermaidComponent`; fence check `if (language === "mermaid") return <MarkdownPreMermaid ...>`; `loadMermaid()` → `mermaid.initialize({ startOnLoad: false, securityLevel: "strict", ...theme })` → `mermaid.render()` → SVG, with chart/code view toggle and SVG/PNG download.
-  2. the Lexical document/artifact preview (`@tencent/smart-doc-plugin-mermaid`): renderer `g$2` with `initialize({ theme:"base", fontFamily:"inherit", flowchart:{useMaxWidth:true}, ... })`, preprocessing `p$3(s$7(code))`, render into an offscreen `width:0;height:0` container, LRU render cache (32) + serialized render queue.
+  1. chat/markdown renderer: `the chat markdown renderer` → `MarkdownPreMermaidComponent`; fence check `if (language === "mermaid") return <MarkdownPreMermaid ...>`; `loadMermaid()` → `mermaid.initialize({ startOnLoad: false, securityLevel: "strict", ...theme })` → `mermaid.render()` → SVG, with chart/code view toggle and SVG/PNG download.
+  2. the Lexical document/artifact preview (`the document/artifact preview renderer`): renderer `g$2` with `initialize({ theme:"base", fontFamily:"inherit", flowchart:{useMaxWidth:true}, ... })`, preprocessing `p$3(s$7(code))`, render into an offscreen `width:0;height:0` container, LRU render cache (32) + serialized render queue.
 - Therefore a ```mermaid fence renders as a REAL engine-drawn diagram (boxes/arrows laid out by the engine — alignment is the engine's job, not the author's). This is drawing the diagram, not dodging it.
-- Character-grid art with CJK is physically unreliable in these previews — 5 rounds of empirical proof: (1) hand-drawn ASCII drifted; (2) coordinate canvas script in narrow chars drifted; (3) markdown table aligned but the user rejected downgrades (框图比表格直观，擅自降级=自我阉割); (4) all-fullwidth grid STILL drifted — Latin mono ≈0.55 em vs CJK ≈1.0 em (real ratio ≈1.7–1.8, not 2), U+3000 does NOT follow the CJK font (renders narrow), fullwidth glyph ink insets add visual offset; (5) mermaid fence → engine-drawn, aligned by construction.
+- Character-grid art with CJK is physically unreliable in these previews — multiple rounds of empirical proof: (1) hand-drawn ASCII drifted; (2) coordinate canvas script in narrow chars drifted; (3) markdown table aligned but the downgrade was rejected downgrades (框图比表格直观，擅自降级=自我阉割); (4) all-fullwidth grid STILL drifted — Latin mono ≈0.55 em vs CJK ≈1.0 em (real ratio ≈1.7–1.8, not 2), U+3000 does NOT follow the CJK font (renders narrow), fullwidth glyph ink insets add visual offset; (5) mermaid fence → engine-drawn, aligned by construction.
 - **TWO different preprocessors mangle the code BEFORE the engine sees it (the real reason naive label syntax fails):**
-  - smart-doc renderer: `s$7 = code.replace(/<br\s*\/?>/gi, " ")` — `<br/>` becomes a **SPACE** (label collapses to one line + CSS re-wrap → the "wrong breaks" the user saw).
+  - smart-doc renderer: `s$7 = code.replace(/<br\s*\/?>/gi, " ")` — `<br/>` becomes a **SPACE** (label collapses to one line + CSS re-wrap → the "wrong breaks" the preview showed).
   - Lexical MermaidComponent: `cleanMermaidCode` replaces `<br/>` → real newline, strips `<p>/<div>/<span>...`.
-  - The engine's label path (`nonMarkdownToHTML`) splits on `<br/>` and on REAL `\n` and converts both to `<br/>`. So real `\n` in source = `<br/>` = then eaten by s$7 → space (round 18).
-- **Multi-line label method — FINAL (round 18 empirical, do not revert):** use the mermaid native entity code **`#10;`** in the quoted label, e.g. `"南京Ａ公司　融资主体・研发・控股#10;注册资本１００万　５名自然人＋持股平台"`. Mechanism: `#10;` is decoded to a real LF **AFTER** lexer tokenization → the label div (`white-space: break-spaces`) renders it as a true line break. It survives ALL three preprocessing layers because: (a) source contains no `<br` → s$7 leaves it; (b) no bare `\n` → no parser blow-up; (c) no `\n` literal string → not turned into `<br/>` then re-eaten. Harness proof: A box `foH=48` (2 lines) with an `\n` inside the text. `&#10;` also breaks but leaves a stray `&` char → do NOT use. **`<br/>` is DEAD** (s$7 → space). **REAL newlines are DEAD** (render BLANK on the user's machine, rounds 8-11 & 17; never reproduced locally — suspected md-importer/cache layer).
-- **wrappingWidth pins ALL multi-line node boxes to ONE width (round 19-20, source-confirmed in addHtmlSpan):** the directive `%%{init:{"flowchart":{"wrappingWidth":W}}}%%` and the code `width: node.width || flowchart.wrappingWidth`. addHtmlSpan builds the label div as `table-cell + white-space:nowrap + max-width:W`; if the ONE-LINE width of the concatenated label ≥ W it switches to `display:table + break-spaces + width:W px` → box is **exactly W px**, irrespective of how short the actual lines are. `W=200` default. There is **no per-node width config** — `node.width` is only set by icon/image shapes, never by normal flowchart nodes. CONSEQUENCE: every box gets the same width. Set W = just above the LONGEST single line so that line doesn't re-wrap: A's longest line ≈ 19 CJK ≈ 304px@16px → **W=310**. At W=310 A=2 lines, B/C content only ~160px so they render as 310px boxes with text centered and huge empty margins (the "下面两个框还是很宽" bug, round 20).
+  - The engine's label path (`nonMarkdownToHTML`) splits on `<br/>` and on REAL `\n` and converts both to `<br/>`. So real `\n` in source = `<br/>` = then eaten by s$7 → space (empirical testing).
+- **Multi-line label method — FINAL (empirical testing empirical, do not revert):** use the mermaid native entity code **`#10;`** in the quoted label, e.g. `"Company A — business unit and scope#10;Capital and shareholder structure"`. Mechanism: `#10;` is decoded to a real LF **AFTER** lexer tokenization → the label div (`white-space: break-spaces`) renders it as a true line break. It survives ALL three preprocessing layers because: (a) source contains no `<br` → s$7 leaves it; (b) no bare `\n` → no parser blow-up; (c) no `\n` literal string → not turned into `<br/>` then re-eaten. Harness proof: A box `foH=48` (2 lines) with an `\n` inside the text. `&#10;` also breaks but leaves a stray `&` char → do NOT use. **`<br/>` is DEAD** (s$7 → space). **REAL newlines are DEAD** (render BLANK on the target machine, earlier attempts; never reproduced locally — suspected md-importer/cache layer).
+- **wrappingWidth pins ALL multi-line node boxes to ONE width (empirical testing, source-confirmed in addHtmlSpan):** the directive `%%{init:{"flowchart":{"wrappingWidth":W}}}%%` and the code `width: node.width || flowchart.wrappingWidth`. addHtmlSpan builds the label div as `table-cell + white-space:nowrap + max-width:W`; if the ONE-LINE width of the concatenated label ≥ W it switches to `display:table + break-spaces + width:W px` → box is **exactly W px**, irrespective of how short the actual lines are. `W=200` default. There is **no per-node width config** — `node.width` is only set by icon/image shapes, never by normal flowchart nodes. CONSEQUENCE: every box gets the same width. Set W = just above the LONGEST single line so that line doesn't re-wrap: A's longest line ≈ 19 CJK ≈ 304px@16px → **W=310**. At W=310 A=2 lines, B/C content only ~160px so they render as 310px boxes with text centered and huge empty margins (the "下面两个框还是很宽" bug, the final empirical state).
 - **`htmlLabels:false` is IGNORED by the bundled engine** (verified strict AND loose → node labels stay SPAN.nodeLabel / HTML). markdown backtick string labels render the literal `` ` `` into the text → unusable. Neither is a fix for per-node width.
-- **Per-node width fix (round 20, FINAL):** inject custom CSS via the directive's `themeCSS` and tag the wide nodes with a class. Full working header + tail:
+- **Per-node width fix (the final empirical state, FINAL):** inject custom CSS via the directive's `themeCSS` and tag the wide nodes with a class. Full working header + tail:
   ```
   %%{init:{"flowchart":{"wrappingWidth":310},"themeCSS":".narrow div{width:175px!important}"}}%%
   flowchart TD
       A["...#10;..."]
       C["...#10;..."]
       B["...#10;..."]
-      A -->|"控股 100%"| C
+      A -->|"100% control"| C
       ...
       class B,C narrow
   ```
@@ -794,23 +794,23 @@ General principle: **for any cmdlet that takes a "Depth / Encoding / PassThru / 
 ### Rules
 
 1. To draw any diagram in a WorkBuddy md file: write a ```mermaid fence (`flowchart TD` etc.), labels in double quotes.
-2. **Multi-line labels: use `#10;`** (mermaid entity code) at every break. NEVER `<br/>` (s$7 → space), NEVER real newlines (`\n` → `<br/>` → eaten → space, and blank on the user's machine). This is the only method that survives all three pipelines (round 18, harness-proven).
+2. **Multi-line labels: use `#10;`** (mermaid entity code) at every break. NEVER `<br/>` (s$7 → space), NEVER real newlines (`\n` → `<br/>` → eaten → space, and blank on the target machine). This is the only method that survives all three pipelines (empirical testing, harness-proven).
 3. Start the diagram with `%%{init:{"flowchart":{"wrappingWidth":310}}}%%`. 310 = just above A's longest line (~304px@16px); W=300/280 re-wrap A into 3 lines. Raise W only if a line ever exceeds ~304px.
 4. **Make a box narrower than the global W: `themeCSS` + `class`**, not `htmlLabels:false` (ignored). Header `"themeCSS":".narrow div{width:175px!important}"` + tail `class B,C narrow`. Override **`width` only** — never `max-width` (would skip the pinning branch → overflow). 175 = B/C longest line + margin; tune per content. Use the class selector, not node-id (ids carry a render-id prefix + counter).
-5. Keep the user's original line structure per box (A=2 / B=3 / C=3) and keep edge-label formulas verbatim (出厂价（成本+5%毛利+税）) — don't drop or reorder for brevity.
+5. Keep the user's original line structure per box (A=2 / B=3 / C=3) and keep edge-label formulas verbatim (pricing formula) — don't drop or reorder for brevity.
 6. Mermaid text is NOT selectable/copyable in previews (SVG). If the diagram text needs reuse, append a labeled plain-text companion block below (e.g. **图内文字（可复制版）**) — otherwise skip it (the user judged the graph self-explanatory and the explanation line was deleted).
 7. Never hand-draw or script-generate CJK character-grid box art for WorkBuddy previews.
-8. Never downgrade a requested diagram to a table — the user explicitly forbade that cop-out.
+8. Never downgrade a requested diagram to a table — downgrades are explicitly forbidden that cop-out.
 9. (Outside WorkBuddy only — a real terminal / VS Code with one CJK mono font: an all-fullwidth grid is the least-bad char approach. Irrelevant inside WorkBuddy.)
 
 ### Local verification harness (reusable — Playwright, not headless-shell)
 
-- `D:\WorkBuddy\_mermaid_probe\`: `vendor-mermaid-DU6uV3LW.js` is the bundled engine pulled out of app.asar (single file — the `771-file` extract from earlier rounds is NOT needed). `run_test5.js` (Playwright) loads a test page and reads the `<pre id="out">` JSON. `test7/test8/test12/test13/test14.html` are the width-tier experiments.
-- **Serve over HTTP, never `file://`**: ES-module `import("./vendor-mermaid-DU6uV3LW.js")` is blocked by CORS on `file://`. Run `python -m http.server 8765 --directory D:/WorkBuddy/_mermaid_probe`, then `run_test5.js <page.html>` hits `http://localhost:8765/<page.html>`.
+- `<probe-dir>/`: `vendor-mermaid-DU6uV3LW.js` is the bundled engine pulled out of the application bundle (single file — the `771-file` extract from earlier rounds is NOT needed). `run_test5.js` (Playwright) loads a test page and reads the `<pre id="out">` JSON. `test7/test8/test12/test13/test14.html` are the width-tier experiments.
+- **Serve over HTTP, never `file://`**: ES-module `import("./vendor-mermaid-DU6uV3LW.js")` is blocked by CORS on `file://`. Run `python -m http.server 8765 --directory <probe-dir>`, then `run_test5.js <page.html>` hits `http://localhost:8765/<page.html>`.
 - Each test page replicates the app chain: `s7(code)` strip (the same `/<br>/→" "` + tag-strip regex) → `mermaid.initialize({startOnLoad:false, securityLevel:"strict", theme:"base", fontFamily:"inherit", flowchart:{useMaxWidth:true}})` → `mermaid.render(id, code, offscreenContainer)`. Then it measures every `foreignObject` whose text is non-empty:
   - `foW/foH` (foreignObject client box), `divW = d.clientWidth`, `sw = d.scrollWidth`, `overflow = sw > divW+1`, `lines = round(d.clientHeight / 24)`.
   - **Re-wrap detector = `overflow` true** (scrollWidth > clientWidth). **Correct = `overflow:false` + the expected `lines` + `divW ≈ W` (or the overridden width).**
   - For edge labels `bbox`/`foW` stays ≤200 (clamp). For node labels assert the box width and line count per the chosen W / themeCSS.
-- Verified final-state assertion (round 20): A `divW=310, lines=2, overflow:false`; B/C `divW=175, lines=3, overflow:false`.
+- Verified final-state assertion (the final empirical state): A `divW=310, lines=2, overflow:false`; B/C `divW=175, lines=3, overflow:false`.
 - **The full Chromium build hangs forever with `--headless=new --dump-dom`** (8+ min, zero output) — Playwright (`chromium.launch()`) is the reliable path; `chrome-headless-shell --dump-dom` also works but Playwright is less fiddly for reading JSON.
 
