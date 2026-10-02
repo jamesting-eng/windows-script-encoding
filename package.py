@@ -21,7 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PKG_NAME = "windows-script-encoding"
-VERSION = "1.0.0"
+VERSION = "1.5.1"
 DIST_SRC = ROOT / "dist" / PKG_NAME  # Chinese ShipHub-ready copy
 
 EXCLUDE_NAMES = {
