@@ -2,8 +2,8 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows Script Encoding Iron Rules
-version: "1.5.2"
-summary: Stop PowerShell parse-stage failures from recurring — write .ps1/.bat/.cmd with CRLF + pure ASCII and self-check before run; plus launcher/WPS/sandbox-test traps
+version: "1.6.0"
+summary: Stop PowerShell parse-stage failures from recurring — write .ps1/.bat/.cmd with CRLF + pure ASCII and self-check before run; plus launcher/WPS/sandbox-test traps and third-party platform / skill-publishing iron rules
 license: MIT
 tags:
   - windows
@@ -12,11 +12,14 @@ tags:
   - crlf
   - mermaid
   - diagram
+  - platform-integration
+  - skill-publishing
 description: |
   Windows script (.ps1/.bat/.cmd) encoding & line-ending iron rules to stop
   PowerShell parse-stage failures from recurring. Write scripts with CRLF + pure
   ASCII via Python, self-check before running, and prefer inline PowerShell over
-  writing script files.
+  writing script files. Also covers launcher, cloud-sync, sandbox-test,
+  i18n, diagram, and third-party platform integration / skill publishing traps.
 read_when:
   - Creating or modifying .ps1 / .bat / .cmd files
   - A PowerShell script "looks like it ran but exits 1 with no error message"
@@ -112,7 +115,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 - ❌ Tweak the format a few times, "looks like it runs, ship it" — untested scripts are time bombs, they'll fail again
 - ❌ Multi-line paren blocks + LF line endings in .bat/.cmd — window flashes closed, zero output
 - ❌ Chinese (or any non-ASCII) in `start "title"` / `title` lines — fails the ASCII read-back check
-- ❌ Running a dev server out of a cloud-synced dir (WPS etc.) for demos — dep-optimizer cache corrupts, page goes blank; serve the production build instead
+- ❌ Running a dev server out of a cloud-synced dir (cloud-drive etc.) for demos — dep-optimizer cache corrupts, page goes blank; serve the production build instead
 - ❌ Treating "all tests passed but exit 1 + runner EPERM" as a code regression — give the test process a private Temp dir
 - ❌ Parallel workers editing the same shared dict file — duplicate keys (TS1117) + torn file structure
 - ❌ Expecting `getByText('exact string')` to still match after i18n wrapping — the text node got split; re-anchor to the container
@@ -138,6 +141,16 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   2. **Run a Python runner script** that loads the body from disk and invokes the API — keeps the Bash command line keyword-free
   3. **Reword descriptions/changelogs** to avoid the literal "PowerShell" word when not strictly needed ("shell parse-stage", "Windows scripting", etc.)
 - **Important**: this is a *Bash tool* block, not a *PowerShell tool* block. The PowerShell tool itself runs fine. The lesson: scan your Bash command line for the word "PowerShell" before running, especially when the command describes a Windows scripting topic.
+
+### Long-running Bash commands die at the default 120s timeout with a bare SIGTERM
+
+- **Symptom**: a compound command (dependency install + heavy processing, e.g. `pip install <pkg>` then a 39-page PDF render) dies with `Exit Code: 1, Signal: SIGTERM` and no useful error, right around the 2-minute mark.
+- **Root cause**: the Bash tool's default timeout is 120 s. Anything longer — dependency installs, document rendering, batch jobs, large downloads — is killed mid-flight, often leaving **partial state** (half-installed package dir, partially written output).
+- **Iron rules**:
+  1. Any command expected to run longer than ~60 s gets an **explicit `timeout` (≥300000 ms)** or runs with `run_in_background: true`. Never gamble on the default.
+  2. **Split compound commands**: install and heavy processing belong in separate calls — one timing out should not poison the other.
+  3. After a SIGTERM, **assume partial state**: check what actually completed (files on disk, pip target dir, output artifacts) and resume from there instead of blindly rerunning from scratch.
+- **Verified case (2026-10-05)**: `pip install pymupdf` + 39-page PDF render in one call → SIGTERM at ~120 s; split into install (target-dir isolation) and render steps, both completed cleanly.
 
 ## Real-world failure cases (lessons from production .bat scripts)
 
@@ -255,7 +268,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   `title` lines, and comments. Self-check by reading the whole file back with
   `io.open(path, encoding='ascii')` — it throws on the first non-ASCII byte and points you at the line.
 
-### Never run a dev server (or build cache) out of a cloud-synced directory (WPS etc.)
+### Never run a dev server (or build cache) out of a cloud-synced directory (cloud-drive etc.)
 
 - **Symptom**: `vite` dev server prints "ready", but the page is blank:
   `Failed to load url /src/main.tsx` + `TypeError: Cannot read properties of undefined (reading 'imports')`.
@@ -451,7 +464,7 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 
 ### Chinese comments in plain .js/.cjs node scripts → SyntaxError
 
-- **Symptom**: a `.cjs` deploy helper containing `/** 中文注释 */` failed to
+- **Symptom**: a `.cjs` deploy helper containing `/** Chinese comment */` failed to
   parse with a SyntaxError in a fresh/external environment — though it ran
   fine where it was written.
 - **Why**: same family as the .bat GBK lesson — the file was saved UTF-8 but
@@ -555,7 +568,49 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
   translation store) while keeping the ban for feature pages. Guard intent is
   preserved; the evolution is documented in-place with a comment.
 
-### Quick hits
+### Idempotent pipeline scripts + reused output dirs = silent content cross-contamination (2026-10-04, hit twice in one day)
+
+- **Symptom**: processing a NEW video, the ASR "completed" instantly and the transcript read like a
+  COMPLETELY DIFFERENT video's content. Twice. Analysis got written to the deliverable doc with the
+  wrong video's content, and the user had to correct it twice.
+- **Root cause (two layers compounding)**:
+  1. **The pipeline script is idempotent by design** — `_vid_asr.py` checks `transcript.txt` exists
+     in the output dir and SKIPS the run (prints the old segment count). Idempotency is usually a
+     virtue; here it silently served stale artifacts.
+  2. **The output dir name was REUSED across sessions/days** — `_vScreen20261003a/b/c` had been
+     used by an EARLIER session to process OTHER videos (video 2 = Songyue, video 5 = Guangnian AI).
+     The new run's frame extraction overwrote frames (fresh, correct), but the ASR skip left the
+     OLD transcript in place. Reading `transcript.txt` then returned ANOTHER video's content as if
+     it were this one's. "Fresh frames + stale transcript" is the worst combo: every signal looks
+     plausible.
+- **Fix (three checks, all mandatory for any idempotent pipeline that produces content you will
+  READ and cite)**:
+  1. **Fresh output dir per item, named by TOPIC not sequence**: `_v<kaiyuan>L1_104/`, never
+     `_vScreen<date><letter>` — sequence letters collide across sessions and days.
+  2. **Content-match verification after every run**: read the transcript FIRST and LAST lines and
+     confirm they match the expected topic/speaker BEFORE citing anything. "Kaiyuan talks product concept" but the
+     transcript opens with methodology insights = cross-contamination → delete dir, re-run in a fresh one.
+  3. **When in doubt, force re-run**: delete the output dir, or bypass the idempotent skip
+     explicitly. Never trust a transcript you didn't verify against the item's topic.
+- **General principle**: idempotent skip logic + non-unique artifact paths = stale data that looks
+  fresh. Frames regenerated but transcript skipped is a TELLTALE mixed-state signature — if frames
+  and transcript could be from different runs, treat the transcript as guilty until verified.
+
+### Follow-up lesson from the same incident: large CJK inline `python -c` fails SILENTLY
+
+- **Symptom**: an inline `python -c "<60-line CJK script>"` that writes a big markdown section
+  produced NO stdout at all (not even its own print statements) and the write never happened —
+  looked like success (no error), the file was never modified.
+- **Why**: large multi-line CJK payloads inside a quoted `-c` argument are fragile in this Bash
+  channel (same family as the double-quote trap above; the failure mode here is total silence,
+  not a visible error).
+- **Fix**: any write-script longer than ~20 lines or containing substantial CJK → **Write it as a
+  `.py` file with the Write tool, then execute by path** (`python -X utf8 script.py`). The script
+  file pattern also makes the print-verification actually visible.
+- **Rule**: for write/merge scripts, "no output" means "did not run" — always follow with a
+  verification read of the target file (section header present? line count grew?).
+
+
 
 - Python `urllib` through the sandbox proxy → `SSL: UNEXPECTED_EOF_WHILE_READING`
   on Google domains (known). Don't debug the site — switch to node `fetch` with
@@ -563,6 +618,19 @@ assert all(b < 128 for b in raw), 'non-ASCII bytes detected — will fail'
 - cloud-synced working copies throw transient `EBUSY` on file writes; retry
   the same edit after a beat instead of switching approach.
 - Transient cloud-deploy auth failure: two consecutive cloud deploy runs died with "a transient auth failure" (SA key present and untouched), the third identical retry passed. Retry once before touching config; if it recurs, suspect egress, not credentials.
+- On a machine running multiple AI sessions in parallel, NEVER share a scratch root: give each session its own subdirectory (e.g. `D:/WorkBuddy/_cd/<session-tag>/`) for every helper script, zip, and report — same-named helper files and lock contention on shared scratch are structural, not incidental (unique filename suffixes are a stopgap, not a fix). Files APPENDED by multiple sessions (shared READMEs/indexes) follow the shared-file protocol: re-read immediately before write, lock-retry the write, re-read after write to verify.
+- Large repo downloads (>20MB) via codeload urllib are unreliable — `IncompleteRead` mid-stream, and subprocess `git`/`curl.exe` fail with WinError 2 under python `-S` isolated mode (PATH stripped). Fix: use FULL paths for all executables (`PortableGit/cmd/git.exe`, `C:/Windows/System32/curl.exe` with `--retry 3`), and prefer `git clone --depth 1` for repos >20MB. If all channels fail, check VPN.
+- Freezing a large document requires TWO steps: (1) add a freeze banner, (2) replace the body with a summary — banner alone doesn't fix the performance issue (57KB body still lags the editor). Back up the full text before slimming.
+- PowerShell "exited 1 with zero output" can be a CHANNEL kill OR a real script error — separate them by re-running the SAME script through the bash channel with `2>&1 | tail`: a real traceback appearing means the script itself is buggy (fix the code); silence again means channel noise (wait/switch). Never blind-retry a silent failure more than once.
+- Before running any newly written or string-patched long script, run `python -m py_compile <script>` as a preflight — it catches syntax errors and bracket mismatches instantly. For STRUCTURAL bugs (tuple arity, bracket nesting, indentation), rewrite the whole script with the Write tool instead of string-replace patching: sed-style patches on code reliably mangle brackets.: give each session its own subdirectory (e.g. `D:/WorkBuddy/_cd/<session-tag>/`) for every helper script, zip, and report — same-named helper files and lock contention on shared scratch are structural, not incidental (unique filename suffixes are a stopgap, not a fix). Files APPENDED by multiple sessions (shared READMEs/indexes) follow the shared-file protocol: re-read immediately before write, lock-retry the write, re-read after write to verify.
+- Long-task scripts (multi-step download/build/install) must write the report INCREMENTALLY, not once at the end: open the report at start, append a marker after every step (probe pattern: start / tmp-ok / request-built / downloaded N bytes / extracted / installed), flush on write, and wrap the whole run in try/finally that writes any error trace before exit. A bare `raise` that skips the report turns a 5-second diagnosis into blind re-runs; a script killed mid-flight must still leave a death-point coordinate on disk. Failures swallowed into variables without hitting the report count as swallowed.
+- PowerShell tool stops returning stdout entirely ("Command completed" with zero output): the channel still EXECUTES — pipe every result into a UTF-8 file from inside the script (`io.open(...,'w',encoding='utf-8')`) and Read the file. Never `1>` redirect from PowerShell: PS 5.1 writes UTF-16 LE and the Read tool flags it as binary.
+- Shared WPS documents get concurrently edited by other workspace sessions between your read and your write: anchor every scripted edit on text verified against the LATEST file state, wrap in asserts (they catch blind writes), and expect WPS conflict copies (`-copyYYYYMMDDHHMMSS.md`) — verify the copy's content then `os.replace` it back to the canonical name.
+- Bash channel intermittently enter a full exit-49 lockout where even harmless probes return 49 empty: `|| true` masks it (fake success). Wait for recovery or switch to the PowerShell tool + managed-Python-full-path; re-probe between rounds.
+- PowerShell tool stops returning stdout entirely ("Command completed" with zero output): the channel still EXECUTES — pipe every result into a UTF-8 file from inside the script (`io.open(...,'w',encoding='utf-8')`) and Read the file. Never `1>` redirect from PowerShell: PS 5.1 writes UTF-16 LE and the Read tool flags it as binary.
+- Shared WPS documents get concurrently edited by other workspace sessions between your read and your write: anchor every scripted edit on text verified against the LATEST file state, wrap in asserts (they catch blind writes), and expect WPS conflict copies (`-copyYYYYMMDDHHMMSS.md`) — verify the copy's content then `os.replace` it back to the canonical name.
+- Bash channel intermittently enter a full exit-49 lockout where even harmless probes return 49 empty: `|| true` masks it (fake success). Wait for recovery or switch to the PowerShell tool + managed-Python-full-path; re-probe between rounds.
+- Never write scratch/redirect files (`> _x.txt`, `__gitstat.txt`) into a WPS-synced workspace root — AI sessions recreate them on every batch, the sync layer resurrects them after cleanup, and 200+ pile up as user-visible junk. Redirect to a local scratch dir (e.g. D:/WorkBuddy/_cd/); when cleaning, whitelist legit root files and delete the rest with the os-remove recipe in small batches — the sync layer fights back mid-batch (expect SIGTERM on rapid rounds, slow down to 15/batch with pauses).
 
 ### Audit gates: model the actual runtime fallback semantics, or the gate drowns
 
@@ -768,13 +836,13 @@ General principle: **for any cmdlet that takes a "Depth / Encoding / PassThru / 
   1. chat/markdown renderer: `the chat markdown renderer` → `MarkdownPreMermaidComponent`; fence check `if (language === "mermaid") return <MarkdownPreMermaid ...>`; `loadMermaid()` → `mermaid.initialize({ startOnLoad: false, securityLevel: "strict", ...theme })` → `mermaid.render()` → SVG, with chart/code view toggle and SVG/PNG download.
   2. the Lexical document/artifact preview (`the document/artifact preview renderer`): renderer `g$2` with `initialize({ theme:"base", fontFamily:"inherit", flowchart:{useMaxWidth:true}, ... })`, preprocessing `p$3(s$7(code))`, render into an offscreen `width:0;height:0` container, LRU render cache (32) + serialized render queue.
 - Therefore a ```mermaid fence renders as a REAL engine-drawn diagram (boxes/arrows laid out by the engine — alignment is the engine's job, not the author's). This is drawing the diagram, not dodging it.
-- Character-grid art with CJK is physically unreliable in these previews — multiple rounds of empirical proof: (1) hand-drawn ASCII drifted; (2) coordinate canvas script in narrow chars drifted; (3) markdown table aligned but the downgrade was rejected downgrades (框图比表格直观，擅自降级=自我阉割); (4) all-fullwidth grid STILL drifted — Latin mono ≈0.55 em vs CJK ≈1.0 em (real ratio ≈1.7–1.8, not 2), U+3000 does NOT follow the CJK font (renders narrow), fullwidth glyph ink insets add visual offset; (5) mermaid fence → engine-drawn, aligned by construction.
+- Character-grid art with CJK is physically unreliable in these previews — multiple rounds of empirical proof: (1) hand-drawn ASCII drifted; (2) coordinate canvas script in narrow chars drifted; (3) markdown table aligned but the downgrade was rejected (diagram is more intuitive than table, unauthorized downgrade is forbidden); (4) all-fullwidth grid STILL drifted — Latin mono ≈0.55 em vs CJK ≈1.0 em (real ratio ≈1.7–1.8, not 2), U+3000 does NOT follow the CJK font (renders narrow), fullwidth glyph ink insets add visual offset; (5) mermaid fence → engine-drawn, aligned by construction.
 - **TWO different preprocessors mangle the code BEFORE the engine sees it (the real reason naive label syntax fails):**
   - smart-doc renderer: `s$7 = code.replace(/<br\s*\/?>/gi, " ")` — `<br/>` becomes a **SPACE** (label collapses to one line + CSS re-wrap → the "wrong breaks" the preview showed).
   - Lexical MermaidComponent: `cleanMermaidCode` replaces `<br/>` → real newline, strips `<p>/<div>/<span>...`.
   - The engine's label path (`nonMarkdownToHTML`) splits on `<br/>` and on REAL `\n` and converts both to `<br/>`. So real `\n` in source = `<br/>` = then eaten by s$7 → space (empirical testing).
 - **Multi-line label method — FINAL (empirical testing empirical, do not revert):** use the mermaid native entity code **`#10;`** in the quoted label, e.g. `"Company A — business unit and scope#10;Capital and shareholder structure"`. Mechanism: `#10;` is decoded to a real LF **AFTER** lexer tokenization → the label div (`white-space: break-spaces`) renders it as a true line break. It survives ALL three preprocessing layers because: (a) source contains no `<br` → s$7 leaves it; (b) no bare `\n` → no parser blow-up; (c) no `\n` literal string → not turned into `<br/>` then re-eaten. Harness proof: A box `foH=48` (2 lines) with an `\n` inside the text. `&#10;` also breaks but leaves a stray `&` char → do NOT use. **`<br/>` is DEAD** (s$7 → space). **REAL newlines are DEAD** (render BLANK on the target machine, earlier attempts; never reproduced locally — suspected md-importer/cache layer).
-- **wrappingWidth pins ALL multi-line node boxes to ONE width (empirical testing, source-confirmed in addHtmlSpan):** the directive `%%{init:{"flowchart":{"wrappingWidth":W}}}%%` and the code `width: node.width || flowchart.wrappingWidth`. addHtmlSpan builds the label div as `table-cell + white-space:nowrap + max-width:W`; if the ONE-LINE width of the concatenated label ≥ W it switches to `display:table + break-spaces + width:W px` → box is **exactly W px**, irrespective of how short the actual lines are. `W=200` default. There is **no per-node width config** — `node.width` is only set by icon/image shapes, never by normal flowchart nodes. CONSEQUENCE: every box gets the same width. Set W = just above the LONGEST single line so that line doesn't re-wrap: A's longest line ≈ 19 CJK ≈ 304px@16px → **W=310**. At W=310 A=2 lines, B/C content only ~160px so they render as 310px boxes with text centered and huge empty margins (the "下面两个框还是很宽" bug, the final empirical state).
+- **wrappingWidth pins ALL multi-line node boxes to ONE width (empirical testing, source-confirmed in addHtmlSpan):** the directive `%%{init:{"flowchart":{"wrappingWidth":W}}}%%` and the code `width: node.width || flowchart.wrappingWidth`. addHtmlSpan builds the label div as `table-cell + white-space:nowrap + max-width:W`; if the ONE-LINE width of the concatenated label ≥ W it switches to `display:table + break-spaces + width:W px` → box is **exactly W px**, irrespective of how short the actual lines are. `W=200` default. There is **no per-node width config** — `node.width` is only set by icon/image shapes, never by normal flowchart nodes. CONSEQUENCE: every box gets the same width. Set W = just above the LONGEST single line so that line doesn't re-wrap: A's longest line ≈ 19 CJK ≈ 304px@16px → **W=310**. At W=310 A=2 lines, B/C content only ~160px so they render as 310px boxes with text centered and huge empty margins (the "the two lower boxes are still too wide" bug, the final empirical state).
 - **`htmlLabels:false` is IGNORED by the bundled engine** (verified strict AND loose → node labels stay SPAN.nodeLabel / HTML). markdown backtick string labels render the literal `` ` `` into the text → unusable. Neither is a fix for per-node width.
 - **Per-node width fix (the final empirical state, FINAL):** inject custom CSS via the directive's `themeCSS` and tag the wide nodes with a class. Full working header + tail:
   ```
@@ -798,7 +866,7 @@ General principle: **for any cmdlet that takes a "Depth / Encoding / PassThru / 
 3. Start the diagram with `%%{init:{"flowchart":{"wrappingWidth":310}}}%%`. 310 = just above A's longest line (~304px@16px); W=300/280 re-wrap A into 3 lines. Raise W only if a line ever exceeds ~304px.
 4. **Make a box narrower than the global W: `themeCSS` + `class`**, not `htmlLabels:false` (ignored). Header `"themeCSS":".narrow div{width:175px!important}"` + tail `class B,C narrow`. Override **`width` only** — never `max-width` (would skip the pinning branch → overflow). 175 = B/C longest line + margin; tune per content. Use the class selector, not node-id (ids carry a render-id prefix + counter).
 5. Keep the user's original line structure per box (A=2 / B=3 / C=3) and keep edge-label formulas verbatim (pricing formula) — don't drop or reorder for brevity.
-6. Mermaid text is NOT selectable/copyable in previews (SVG). If the diagram text needs reuse, append a labeled plain-text companion block below (e.g. **图内文字（可复制版）**) — otherwise skip it (the user judged the graph self-explanatory and the explanation line was deleted).
+6. Mermaid text is NOT selectable/copyable in previews (SVG). If the diagram text needs reuse, append a labeled plain-text companion block below (e.g. **Diagram text (copyable version)**) — otherwise skip it (the user judged the graph self-explanatory and the explanation line was deleted).
 7. Never hand-draw or script-generate CJK character-grid box art for WorkBuddy previews.
 8. Never downgrade a requested diagram to a table — downgrades are explicitly forbidden that cop-out.
 9. (Outside WorkBuddy only — a real terminal / VS Code with one CJK mono font: an all-fullwidth grid is the least-bad char approach. Irrelevant inside WorkBuddy.)
@@ -813,4 +881,67 @@ General principle: **for any cmdlet that takes a "Depth / Encoding / PassThru / 
   - For edge labels `bbox`/`foW` stays ≤200 (clamp). For node labels assert the box width and line count per the chosen W / themeCSS.
 - Verified final-state assertion (the final empirical state): A `divW=310, lines=2, overflow:false`; B/C `divW=175, lines=3, overflow:false`.
 - **The full Chromium build hangs forever with `--headless=new --dump-dom`** (8+ min, zero output) — Playwright (`chromium.launch()`) is the reliable path; `chrome-headless-shell --dump-dom` also works but Playwright is less fiddly for reading JSON.
+
+
+## Third-party platform integration & skill publishing iron rules
+
+> Scope: whenever you integrate a payment, login, message, or any third-party platform, or publish/update a skill on SkillHub / GitHub. These rules were paid for during an Alipay AI-pay Pay Skill launch (2026-10). Break one and the cost is "stuck for days + repeated rework".
+
+### When this section applies
+
+- Integrating payments, login, or push notifications from any third-party platform
+- Publishing or updating a skill on SkillHub / GitHub
+- Changing production config or deploying an externally reachable service
+- Code won't run and you suspect a "platform-side issue" but keep going in circles
+
+### Ten iron rules
+
+| # | Rule | Real pitfall hit | Do it right |
+|---|------|-----------------|-------------|
+| 1 | **Root path / callback entry returns `success` by default** | Platform probed the root path, got 402/404, failed the gateway check | Any callback, gateway, or root path returns `success`/200 by default; business 402 lives only on a specific resource path |
+| 2 | **Production config and test config are physically isolated** | Changed bill amount to 0.01 for easy testing, but the platform's registered unit price was 2.68 — mismatch caused a "system error" | Test values go in env vars or a separate file, never hardcoded in business code; before changing a test value, check "what value did the other side register" |
+| 3 | **Run dependent tasks in order, no jumping ahead** | Platform required "finish onboarding verification before publishing a Pay Skill", but an un-reworked version was published first and got stuck in review, un-cancelable | List prerequisites; don't start the next until the prior is checked off; before publishing, confirm the platform doesn't require a prior onboarding step |
+| 4 | **Buyer and seller credentials must be separate** | Treated the "merchant app authorization" QR as a "buyer login session", called the production cashier, got `AUTH_FAILED` forever | Draw both roles' credentials clearly: merchant-side call permission ≠ buyer payment identity; one cannot replace the other |
+| 5 | **Sandbox tool ≠ production tool** | Changed the official sandbox script's endpoint to production and assumed it would run in prod; the docs literally say "this flow does not initiate real transactions" | Before adapting, read the docs' "limitations" and "scope"; a sandbox script only proves your code has no bug, it does not replace a real transaction |
+| 6 | **Prepare a non-same-entity buyer account for payment-loop testing** | Opened the buyer wallet with the seller account, hit "buyer and seller cannot be the same" | Have a payment account that does NOT belong to the seller ready before testing; don't grab the main account as buyer on the spot |
+| 7 | **Install the official tool and pass baseline before adapting** | Never actually loaded the official skill, hacked for half a day, user asked "did you even install it" | Before adapting, install the official skill / CLI / SDK and run the official demo once to confirm the environment is fine |
+| 8 | **Version number aligned in five places** | Review queue showed v1.1.0, local was already v1.1.1 — out of sync | manifest / SKILL.md / package / zip / live — change one, sync all five |
+| 9 | **Check the permission switch before calling an API** | API returned `isv.insufficient-isv-permissions` and kept swapping params/keys — useless | On a permission error, go to the platform console and confirm "product signed / API permission" is enabled; swapping param fields won't fix permissions |
+| 10 | **Implement the callback in code before filling it into the console** | Platform required an async-notify URL, but the code had no matching route | First write the `/notify` route in the server and return `success`, then put it in the platform config; reversed order leads to omissions |
+
+### Pre-launch / pre-publish self-check
+
+- [ ] Root path, callback path, gateway path return `success` by default (Rule 1)
+- [ ] No test amount / test key / test endpoint hardcoded into business code (Rule 2)
+- [ ] All platform-required onboarding / verification done, nothing jumped (Rule 3)
+- [ ] Buyer/seller / multi-role credentials separated, not mixed (Rule 4)
+- [ ] Sandbox script not treated as a production tool and run directly (Rule 5)
+- [ ] Test buyer account is not the seller themselves (Rule 6)
+- [ ] Official skill / CLI / SDK installed and baseline passed (Rule 7)
+- [ ] Version number identical in all five places (Rule 8)
+- [ ] Platform console "product signed / API permission" enabled (Rule 9)
+- [ ] Every callback URL to be filled into the console is already implemented in code and returns `success` (Rule 10)
+
+### Post-mortem: an Alipay AI-pay Pay Skill launch (2026-10)
+
+A developer wanted to add "AI pay-per-use" to their own skill. Full timeline mapped to the rules:
+
+1. **Adapted without installing the official tool** (broke 7): read code snippets and changed endpoints, never ran the official demo, spun for a full day.
+2. **Sandbox as production** (broke 5): changed the sandbox script's endpoint to production and ran it; docs actually hard-code "does not initiate real transactions".
+3. **Credential confusion** (broke 4): scanned the "merchant app authorization" QR, wrongly assumed the server now had a buyer login session; production cashier kept returning `AUTH_FAILED`.
+4. **Jumped the publish** (broke 3): platform required onboarding verification before publishing a Pay Skill, but an un-reworked version was published first, stuck in un-cancelable review — a pure waste.
+5. **Root path didn't return success** (broke 1): gateway probe got 402 on root, failed the check, stuck at the "application gateway" step.
+6. **Test value polluted production** (broke 2): changed bill amount to 0.01 for testing, mismatched the platform's registered 2.68, payment returned "system error".
+7. **Self-deal** (broke 6): opened the buyer wallet with the seller account, hit "buyer and seller cannot be the same" — which actually proved the merchant-side code was fully correct, only a non-seller buyer was missing.
+8. **Version out of sync** (broke 8): live showed the old version, local the new — mismatch.
+
+**Cost**: the same task reworked for 3 days, plus one un-cancelable review zombie.
+
+**Correct order**: ① install official skill, pass sandbox demo → ② complete platform onboarding / signing / permission enabling → ③ change your own server (root returns success, amount matches platform registration, callback implemented first) → ④ run the real loop with a non-seller buyer account → ⑤ only then publish the Pay Skill with the version aligned in five places.
+
+### Boundaries of these rules
+
+- These are "high-frequency failure points", not absolute laws. Solo projects and pure-local scripts may relax the strictness of config isolation (Rule 2).
+- But anything "integrates a third-party platform + goes live", all ten apply, no exceptions.
+- If you're stuck on a platform error for over 30 minutes, re-read these ten; eight times out of ten one of them was broken.
 
