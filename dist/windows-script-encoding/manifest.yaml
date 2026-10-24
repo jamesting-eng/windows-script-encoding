@@ -1,5 +1,5 @@
 name: windows-script-encoding
-version: 1.8.12
+version: 1.9.0
 description: "Windows 脚本（.ps1/.bat/.cmd）编码与行尾铁律，避免 PowerShell 解析报错反复翻车（CRLF + 纯 ASCII，运行前必做自检）；另附 launcher、云盘同步、沙箱测试、国际化、图表绘制、第三方平台接入与技能发布、外部鉴权/云端 SDK 集成铁律（云端会话绑发起客户端、/.cloud/auth 端点、服务端行车记录仪）以及前端布局调试铁律"
 category: dev-tools
 author: jamesting-eng

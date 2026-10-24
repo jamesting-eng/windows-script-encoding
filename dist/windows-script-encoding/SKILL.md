@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows 脚本编码铁律
-version: "1.8.12"
+version: "1.9.0"
 summary: 避免 PowerShell 解析报错反复翻车——.ps1/.bat/.cmd 一律 CRLF + 纯 ASCII，运行前必做自检；另附 launcher/云盘/沙箱测试陷阱、国际化、图表绘制、第三方平台接入与技能发布铁律、外部鉴权/云端 SDK 集成铁律（云端会话绑发起客户端、/.cloud/auth 端点、服务端行车记录仪），以及前端布局调试铁律（改偏移前先量、数字+单位基线对齐、无头截图卫生）
 license: MIT
 tags:
@@ -82,6 +82,73 @@ read_when:
 4. **共享文件**：编辑串行 / 单一所有者；并行 worker 只写互不相交的产物，由一个所有者合并——比对时**两边归一化转义**（见第二批教训）。
 5. **校验解析「当前」产物**：入口文件引用的那个 bundle，两边同名 sha256；运行时探针只见到可达的应用状态——有门槛/轮换内容补静态审计。
 6. **兜底顺序**：PowerShell inline → 自检过的 .ps1 → Bash 通道跑 Python。
+
+## 30 秒自动自检（脚本）
+
+上面的手工清单有效，但一条命令更快、也不会被跳过。包内自带 `scripts/encoding_selfcheck.py`（纯 ASCII，仅标准库）：
+
+```bash
+python encoding_selfcheck.py deploy.ps1 run.bat           # 检查指定文件
+python encoding_selfcheck.py ./scripts                    # 递归扫描目录（.ps1/.bat/.cmd）
+python encoding_selfcheck.py ./src --ext py,ts            # 顺带扫描其他扩展名
+```
+
+每个文件输出 `[OK]` / `[FAIL]` 加三个数字：CRLF 数、裸 LF 数、非 ASCII 字节数。退出码：`0` 全过、`1` 有违规。把每个 FAIL 修掉（转 CRLF、清非 ASCII）再跑到全绿——这就是「写完立即自检」铁律的可执行形态。目标机器没有 Python？单文件等价 PowerShell 一行版：
+
+```powershell
+$b=[IO.File]::ReadAllBytes('deploy.ps1'); "CRLF=$([regex]::Matches([Text.Encoding]::ASCII.GetString($b),"\r\n").Count) LFonly=$((($b | ? {$_ -eq 10}).Count) - (([regex]::Matches([Text.Encoding]::ASCII.GetString($b),"\r\n").Count))) nonASCII=$(($b | ? {$_ -gt 127}).Count)"
+```
+
+## 症状速查表
+
+报错信息 / 现象 → 拥有修法的章节。先扫这张表，只读命中的那一节。
+
+| 症状 / 报错 | 去哪 |
+|---|---|
+| PowerShell「解析阶段就报语法错误」，工具什么都不显示 | 铁律（必须遵守）——CRLF + 纯 ASCII，然后重跑自检 |
+| 同一脚本要改几次「格式」才能跑（LF↔CRLF 反复横跳） | 上面的预检清单 + 自检脚本 |
+| `.bat` 窗口一闪而过 / 批处理主体没执行 | 真实翻车案例（生产 .bat 脚本教训） |
+| Bash 退出码 49 零输出；`copy` 等词被静默拦截 | 启动器、云盘与沙箱测试陷阱 |
+| 沙箱 `Temp` EPERM；安全中心拦截同步目录里的新建文件 | 启动器、云盘与沙箱测试陷阱；另见铁律 4（临时文件备注） |
+| 删掉的构建产物在云目录里复活（僵尸/复活） | 云同步构建目录：复活与僵尸清理 |
+| 构建死在 node_modules barrel 导入 / 源码 ENOENT，源码零改动 | 云同步构建目录（1.8.x 事故三部曲） |
+| 按「入口 HTML 引用」清理构建目录后应用白屏 | 云同步构建目录（僵尸保留集 = 入口 BUNDLE 闭包） |
+| firebase / 云部署间歇性 "Failed to authenticate" | 外部鉴权 / 云端 SDK 集成铁律 |
+| `invalid_grant` / `invalid_client` / 鉴权端点 404 | 外部鉴权 / 云端 SDK 集成铁律（铁律 3–4） |
+| i18n：运行时探针通过了，仍有未翻译/过期文案 | 国际化与文本重构陷阱 + 国际化陷阱补遗 |
+| Mermaid 中文标签折行/裁切 | markdown 里带中文标签的图表：用内置 Mermaid 引擎 |
+| 无头截图空白区域 / 顶部灰条 | 前端铁律 3 —— 无头截图卫生 |
+| 渲染「成功」但区域白屏 / PIL 叠加层偏移 / 右边缘被裁 | 前端铁律 4 —— Edge 无头打印渲染管线 |
+| `npm install` 报 `Class extends value undefined`（重装后正常） | 相关环境陷阱（托管 git & npm 二进制） |
+| `Out-File` / `Set-Content` / `>` 输出乱码或跨机器不一致 | PS cmdlet 默认值 / 跨版本 / profile 陷阱 |
+| 构建产物在裸 Node 下 tsc `ERR_MODULE_NOT_FOUND` | 相关环境陷阱（moduleResolution: bundler） |
+| 发布技能 / 接第三方平台反复失败 | 第三方平台接入与技能发布铁律 |
+| Windows 多进程 spawn 一 import 就崩 | 相关环境陷阱（multiprocessing spawn） |
+
+## 按场景阅读地图
+
+直接跳到你正在做的事；其余的以后再说。
+
+- **写或修 `.ps1` / `.bat` / `.cmd`** → 预检清单 → 铁律 → 真实翻车案例
+- **在 WPS 同步目录里构建 / 部署** → 启动器、云盘与沙箱测试陷阱 → 云同步构建目录
+- **登录 / 鉴权 / 云端 SDK 集成** → 外部鉴权 / 云端 SDK 集成铁律
+- **i18n / 文本重构** → 国际化与文本重构陷阱 → 国际化陷阱补遗
+- **带中文标签的 Mermaid 图** → markdown 里带中文标签的图表
+- **无头截图、像素级导出、前端布局** → 前端布局调试铁律（铁律 1–4）
+- **发布技能或接平台** → 第三方平台接入与技能发布铁律
+- **PowerShell 跨机器/跨版本行为不一致** → PS cmdlet 默认值 / 跨版本 / profile 陷阱
+- **Node / TS / npm 工具链怪事** → 相关环境陷阱
+
+## 能力边界
+
+本技能是什么：一份实测踩坑手册，覆盖 Windows 脚本工作——编码（CRLF + 纯 ASCII）、启动器/云盘/沙箱陷阱、i18n、Mermaid 中文、前端无头布局调试、PowerShell 版本坑、第三方平台与技能发布、外部鉴权 / 云端 SDK、Node/TS 工具链陷阱。每条规则都来自真实事故，附修法。
+
+本技能不是什么：
+
+- **不是 linter 或 CI 闸门。** 它写清楚要查什么、附带一个检查脚本，但没有任何东西自动运行——你必须（或让你的流水线）自己调用预检清单和 `encoding_selfcheck.py`。
+- **不是完备百科。** 内容是经验驱动的：一个坑要反复出现并被定位根因后才会收录。没收录的坑依然可能存在。
+- **不是从零开始的 PowerShell/批处理教程。** 假定你已经能读懂自己在调试的脚本。
+- **不管非 Windows。** macOS/Linux 的 shell 怪癖不在范围内，除非某个跨工具陷阱碰到它们。
 
 ## 触发症状（"我之前就在不同的项目对话里发生过好多次了"那种）
 - PowerShell 脚本在目标机器上**"解析阶段就报错了（语法问题）"**，但工具回显里**完全看不到错误信息**，只看到 exit 1

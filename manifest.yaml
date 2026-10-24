@@ -1,5 +1,5 @@
 name: windows-script-encoding
-version: 1.8.12
+version: 1.9.0
 description: "Windows script (.ps1/.bat/.cmd) encoding & line-ending iron rules — stop PowerShell parse-stage failures from recurring (CRLF + pure ASCII, self-check before run); plus launcher, cloud-sync, sandbox-test, i18n, diagram, third-party platform / skill publishing traps, external-auth / cloud-SDK integration rules (client-bound sessions, /.cloud/auth endpoints, server-side dashcam), and front-end layout-debugging iron rules (measure before changing offsets, baseline-align number+unit, headless-screenshot hygiene), and Node/TS toolchain traps (spawning .js on Windows / EFTYPE, stale nested deps breaking bundled npm, extensionless ESM output from bundler moduleResolution)"
 category: dev-tools
 author: jamesting-eng

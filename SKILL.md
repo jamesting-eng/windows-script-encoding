@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows Script Encoding Iron Rules
-version: "1.8.12"
+version: "1.9.0"
 summary: Stop PowerShell parse-stage failures from recurring — write .ps1/.bat/.cmd with CRLF + pure ASCII and self-check before run; plus launcher/WPS/sandbox-test traps, third-party platform / skill-publishing iron rules, external-auth / cloud-SDK integration rules (client-bound sessions, /.cloud/auth endpoints, server-side dashcam), and front-end layout-debugging iron rules (measure before you change offsets, baseline-align number+unit, headless-screenshot hygiene)
 license: MIT
 tags:
@@ -95,6 +95,73 @@ read_when:
    same-named sha256 both sides; a runtime probe only sees the app-state it can reach — complement
    with a static audit for gated/rotated content.
 6. **Fallback order**: PowerShell inline → `.ps1` with self-check → Python via Bash channel.
+
+## 30-second automated self-check (script)
+
+The manual checklist above works, but a command is faster and never gets skipped. The package ships `scripts/encoding_selfcheck.py` (pure ASCII, stdlib only):
+
+```bash
+python encoding_selfcheck.py deploy.ps1 run.bat           # specific files
+python encoding_selfcheck.py ./scripts                    # scan a dir recursively (.ps1/.bat/.cmd)
+python encoding_selfcheck.py ./src --ext py,ts            # also scan other extensions
+```
+
+Each file is reported as `[OK]` / `[FAIL]` with three numbers: CRLF count, bare-LF count, non-ASCII byte count. Exit code: `0` all pass, `1` violations found. Fix every FAIL (convert to CRLF, strip non-ASCII) and re-run until clean — this is the "write, then immediately self-check" iron rule in executable form. No Python on the target machine? Equivalent PowerShell one-liner for a single file:
+
+```powershell
+$b=[IO.File]::ReadAllBytes('deploy.ps1'); "CRLF=$([regex]::Matches([Text.Encoding]::ASCII.GetString($b),"\r\n").Count) LFonly=$((($b | ? {$_ -eq 10}).Count) - (([regex]::Matches([Text.Encoding]::ASCII.GetString($b),"\r\n").Count))) nonASCII=$(($b | ? {$_ -gt 127}).Count)"
+```
+
+## Symptom-to-fix lookup table
+
+Error message / phenomenon → the section that owns the fix. Skim this table first; read only the section you land on.
+
+| Symptom / error | Go to |
+|---|---|
+| PowerShell "syntax error at parse stage", tool shows nothing | Iron rules (must follow) — CRLF + pure ASCII, then re-run self-check |
+| Same script needs "format tweaks" several times before it runs (LF↔CRLF flip-flop) | Pre-flight checklist + self-check script above |
+| `.bat` window flashes and closes / batch never runs its body | Real-world failure cases (lessons from production .bat scripts) |
+| Bash exit code 49 with zero output; `copy`-like words silently blocked | Launcher, cloud-sync and sandbox-test traps |
+| Sandbox `Temp` EPERM; Security Center blocks new files in synced dirs | Launcher, cloud-sync and sandbox-test traps; also Iron rule 4 (temp-file note) |
+| Deleted build outputs reappear in the cloud dir (resurrection / zombies) | Cloud-sync build directories: resurrection and zombie cleanup |
+| Build dies on node_modules barrel import / source ENOENT, zero source changes | Cloud-sync build directories (1.8.x incident trilogy) |
+| White screen after cleaning the build dir down to entry-HTML refs | Cloud-sync build directories (zombie keep-set = entry BUNDLE closure) |
+| firebase / cloud deploy "Failed to authenticate" intermittently | External-auth / cloud-SDK integration iron rules |
+| `invalid_grant` / `invalid_client` / auth endpoint 404 | External-auth / cloud-SDK integration iron rules (rules 3–4) |
+| i18n: untranslated or stale strings survive a runtime probe | Internationalization and text-refactor traps + More internationalization traps |
+| Mermaid CJK labels wrap / clip in markdown | Diagrams with CJK labels in markdown: use the built-in Mermaid engine |
+| Headless screenshot blank regions / top gray strip | Front-end Iron rule 3 — headless screenshot hygiene |
+| Render "succeeds" but region white / PIL overlay offset / right edge clipped | Front-end Iron rule 4 — Edge headless print-render pipeline |
+| `npm install` `Class extends value undefined` (works after reinstall) | Related environment traps (vendored / managed git & npm binaries) |
+| `Out-File` / `Set-Content` / `>` output garbled or differs across machines | PS cmdlet defaults / cross-version / profile pitfalls |
+| tsc `ERR_MODULE_NOT_FOUND` on built output in bare Node | Related environment traps (moduleResolution: bundler) |
+| Publishing a skill / integrating a third-party platform keeps failing | Third-party platform integration & skill publishing iron rules |
+| Windows multiprocessing spawn crashes on import | Related environment traps (multiprocessing spawn) |
+
+## Reading map by scenario
+
+Jump straight to what you are doing; the rest can wait.
+
+- **Writing or fixing `.ps1` / `.bat` / `.cmd`** → Pre-flight checklist → Iron rules → Real-world failure cases
+- **Building / deploying inside a WPS-synced directory** → Launcher, cloud-sync and sandbox-test traps → Cloud-sync build directories
+- **Login / auth / cloud SDK integration** → External-auth / cloud-SDK integration iron rules
+- **i18n / text refactor** → Internationalization and text-refactor traps → More internationalization traps
+- **Mermaid diagrams with Chinese labels** → Diagrams with CJK labels in markdown
+- **Headless screenshots, pixel-exact exports, front-end layout** → Front-end layout debugging iron rules (rules 1–4)
+- **Publishing a skill or integrating a platform** → Third-party platform integration & skill publishing iron rules
+- **PowerShell behaves differently across machines/versions** → PS cmdlet defaults / cross-version / profile pitfalls
+- **Node / TS / npm toolchain weirdness** → Related environment traps
+
+## Capability boundaries
+
+What this skill is: a field-tested pit handbook for Windows script work — encoding (CRLF + pure ASCII), launcher/cloud-sync/sandbox traps, i18n, Mermaid CJK, front-end headless layout debugging, PowerShell version pitfalls, third-party platform & skill publishing, external auth / cloud SDK, and Node/TS toolchain traps. Every rule here was learned from a real incident and includes the fix.
+
+What this skill is not:
+
+- **Not a linter or CI gate.** It documents what to check and ships a checker script, but nothing runs automatically — you (or your pipeline) must invoke the pre-flight checklist and `encoding_selfcheck.py` yourself.
+- **Not a complete encyclopedia.** Content is experience-driven: a trap gets added after it recurs and gets root-caused. An unlisted trap can still exist.
+- **Not a from-zero PowerShell/batch tutorial.** It assumes you can already read the scripts you are debugging.
+- **Not non-Windows.** macOS/Linux shell quirks are out of scope except where a cross-tool trap touches them.
 
 ## Trigger symptoms (the "this recurs in multiple project chats" kind)
 - A PowerShell script fails with **"syntax error at parse stage"** on the target machine, but the tool shows **no error message at all** — only exit 1
