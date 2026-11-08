@@ -1,6 +1,6 @@
 name: windows-script-encoding
-version: 1.9.0
-description: "Windows 脚本（.ps1/.bat/.cmd）编码与行尾铁律，避免 PowerShell 解析报错反复翻车（CRLF + 纯 ASCII，运行前必做自检）；另附 launcher、云盘同步、沙箱测试、国际化、图表绘制、第三方平台接入与技能发布、外部鉴权/云端 SDK 集成铁律（云端会话绑发起客户端、/.cloud/auth 端点、服务端行车记录仪）以及前端布局调试铁律"
+version: 1.27.0
+description: "Windows 脚本（.ps1/.bat/.cmd）编码与行尾铁律，避免 PowerShell 解析报错反复翻车（CRLF + 纯 ASCII，运行前必做自检）；另附 launcher、云盘同步、沙箱测试、国际化、图表绘制、第三方平台接入与技能发布、外部鉴权/云端 SDK 集成铁律（云端会话绑发起客户端、/.cloud/auth 端点、服务端行车记录仪）、前端布局调试铁律，以及前端测试可见性与重构边界铁律（CSS 隐藏不等于没挂载、渲染范围要可选加入、零变化重构不许夹带行为变更）、收尾自检卫生（写死前缀的校验跨位后少算、锚点粘进替换文本会被写回、物理路径也可能读到滞后快照、纯空白改动会合并或多插空行），以及发布面暴露铁律（整目录上传让 .gitignore 形同虚设，唯一保证是运行时拒绝 + 部署前守卫，且必须两侧都验）"
 category: dev-tools
 author: jamesting-eng
 license: MIT
@@ -14,6 +14,7 @@ keywords:
   - crlf
   - ascii
   - 脚本
+  - edgeone
 platforms:
   - windows
 requirements:
