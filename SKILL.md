@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows Script Encoding Iron Rules
-version: "1.35.0"
+version: "1.35.1"
 summary: One reusable ledger of engineering traps that actually bit — each entry states the symptom, the root cause and the fix — plus runnable checkers, covering Windows script encoding (CRLF + pure ASCII), launchers and cloud sync, deploy target and deploy surface, verification chains, data honesty, database migration, front-end layout and test visibility, HTML to DOCX, third-party publishing, front-end coding discipline, verifying a visual reproduction, and customer-facing notification pipelines. Start from read_when — each trigger names the moment before the rake.
 license: MIT
 tags:
@@ -23,7 +23,7 @@ description: |
 
   How to use it: read the one-liner and the pre-flight checklist first, then open
   only the entries whose trigger matches your symptom. The release history sits at
-  the end of the file and is for maintainers only.
+  the end of the file .
 read_when:
   - 'Creating or modifying .ps1 / .bat / .cmd files'
   - 'A PowerShell script "looks like it ran but exits 1 with no error message"'
@@ -204,7 +204,6 @@ read_when:
 
 **Are these universal rules?** No -- they are empirical findings, not a standard. Where a project's facts contradict an entry, the project wins; note the exception next to the entry rather than silently ignoring it.
 
-**Why is the release history at the end?** Only maintainers need it. Readers looking for a fix should never have to scroll past it.
 
 
 ### Symptom-to-fix lookup table
@@ -257,7 +256,6 @@ Error message / phenomenon → the section that owns the fix. Skim this table fi
 | A live junction is reported as 'not a link' by `os.path.islink()` | Launcher, cloud-sync and sandbox-test traps — [97] reparse-point bit + realpath |
 
 
-
 ### Reading map by scenario
 
 Jump straight to what you are doing; the rest can wait.
@@ -282,7 +280,6 @@ Jump straight to what you are doing; the rest can wait.
 
 - **A destructive script (switch / migrate / bulk delete / rebuild) is about to run** → Launcher, cloud-sync and sandbox-test traps — [93]/[94] first: dry-run branch, backup proof, explicit confirmation
 - **A launcher behaves differently under admin rights, or a log comes back as mojibake** → Launcher, cloud-sync and sandbox-test traps ([95]) + Related environment traps ([96])
-
 
 
 ### Capability boundaries
@@ -328,7 +325,6 @@ What this skill is not:
 - **Still suspect environment**: run via Python `subprocess.run(['powershell','-File',path], capture_output=True)` yourself (Bash→pwsh is intercepted locally; use the PowerShell tool itself)
 
 
-
 ## Iron rules and the pre-flight workflow
 
 ### Pre-flight checklist (run BEFORE writing/running anything in the trigger list — not after it fails)
@@ -347,7 +343,6 @@ What this skill is not:
 6. **Fallback order**: PowerShell inline → `.ps1` with self-check → Python via Bash channel.
 
 **One-click flow — safe destructive script / launcher run (the full path, not just a rule).** 1) Prove the backup exists and the target is redundant. 2) Add/confirm a `--dry-run` branch and run it first. 3) Run the file's own self-check + `python -m py_compile` for `.py`. 4) For `.bat`/`.cmd`: CRLF + ASCII, explicit interpreter path, failure-only `pause`. 5) Execute with an explicit user confirmation. 6) Verify by READING the result — log file, realpath, file count — not by watching the window. 7) If a delete hangs, switch to `python -S` and re-assert step 1 before deleting. Read the matching numbered entry above only when a step fails.
-
 
 
 ### 30-second automated self-check (script)
@@ -422,7 +417,6 @@ for x in d.get('tags', []):
 **Applicability boundary — read before treating any rule above as absolute.** These are field-tested defaults, not laws of nature. Each rule was added because it prevented a real incident, but a rule stated without its scope becomes a new trap: verify it still applies to your toolchain/OS version before copying it. Rules marked 'iron' (CRLF + pure ASCII for `.bat`/`.cmd`, no sync-dir dev server, no `shutil.rmtree` under the delete shim) are hard constraints on Windows + WorkBuddy. Rules tied to a specific version, host or cloud client are observations — re-run the self-check and read the current file state instead of trusting a remembered conclusion. When a rule and direct evidence disagree, the evidence wins: state the scope, then update this ledger so the next reader inherits the correction.
 
 
-
 ### Standard workflow
 1. **Avoid writing a script if possible** — if a one-line PowerShell command via the tool works, use that
 2. **Must write `.ps1` / `.bat` / `.cmd`**: Python binary write + force CRLF + pure ASCII
@@ -432,7 +426,6 @@ for x in d.get('tags', []):
 6. **Cross-project**: scan every `.bat`/`.cmd`/`.ps1` against this checklist before delivery
 
 **Path self-check — do this before copying any command example below.** Every example in this ledger was written on one machine and may name a directory that does not exist on yours. Before running: (a) resolve the real path (`os.path.realpath` / `cd` + `pwd`) and compare it with the example's base; (b) confirm the interpreter (`where python`, or the managed `binaries/python/versions/*/python.exe`); (c) replace hardcoded roots with placeholders or variables relative to the script's own directory (`%~dp0` in a batch, `Path(__file__).parent` in Python). A command that silently did nothing is usually a path that pointed somewhere plausible but wrong.
-
 
 
 ### Anti-patterns (hard-won lessons)
@@ -450,7 +443,6 @@ for x in d.get('tags', []):
 - ❌ Expecting `getByText('exact string')` to still match after i18n wrapping — the text node got split; re-anchor to the container
 - ❌ Prefix-based bulk cleanup of localStorage without exempting preference keys — the app deletes its own settings
 - ❌ Fighting a cloud-sync layer by re-deleting resurrected files upstream — win at the deploy boundary with a runtime-closure copy
-
 
 
 ## Scripts, launchers and sandbox traps
@@ -767,10 +759,6 @@ for x in d.get('tags', []):
 **[97] Junction detection with `os.path.islink()` returns False on Windows junctions, so a "is it still linked?" check silently mis-classifies a live junction as a plain directory.** The switch script had to use `bool(ctypes.windll.kernel32.GetFileAttributesW(p) & 0x400)` (`FILE_ATTRIBUTE_REPARSE_POINT`). **Fix: use the reparse-point bit (or `fsutil reparsepoint query`) on Windows; never trust `islink()` alone.** Note both junctions and symlinks set this bit — if you must tell them apart, inspect the reparse tag. After a switch, verify realpaths (`os.path.realpath`) of every expected junction, not just their existence.
 
 
-
-
-
-
 ## Cloud-sync build directories: resurrection and zombie cleanup
 
 ### Cloud-sync build directories: resurrection and zombie cleanup
@@ -979,7 +967,6 @@ the user — a manual Explorer delete is NOT rolled back by WPS (verified) and f
 **Generalizes to every tool that wipes its output first**: `dist/`, `.next/`, `.edgeone/assets`, `target/`, `build/`. When a build fails with a delete-guard error and none of your own code is in the stack, clear the output directory and rerun **before** investigating anything else.
 
 **Do not** try to whitelist the shim, raise the threshold, or route around it with a shell `rm -rf`: the guard is enforced by the runtime, the shell route gets the process killed with no output, and a raised threshold only moves the cliff further out.
-
 
 
 ## Related environment traps (cross-tool)
@@ -1499,9 +1486,6 @@ Fix, written as preconditions: before re-publishing any directory that contains 
 **[98] A network step failed once and the whole run was marked broken — or, worse, a localhost call was swallowed by an HTTP proxy and looked like a dead server.** Transient network failures are normal; treat them as retryable, not as proof the tool is broken. Symptoms: intermittent `Failed to authenticate`, timeouts, empty stdout with a non-zero exit, `ECONNREFUSED` on `localhost` even though the server is up. Fix: (a) for local targets, bypass the proxy explicitly (`curl --noproxy '*' ...`, or set `NO_PROXY=localhost,127.0.0.1`); (b) retry the step 2–3 times with a short backoff before declaring failure, while keeping the rest of the chain unchanged; (c) log each attempt's exit code and a timestamped line so you can tell a transient blip from a persistent break. Do NOT retry destructive write operations blindly — only read/probe/deploy-verify steps. If retries change the outcome, record that in this ledger as a version-specific observation, not a new iron rule.
 
 
-
-
-
 ## Front-end engineering: layout, tests, auth UI and page families
 
 ### Front-end layout debugging iron rules (vibe-coding visual fixes the user flags via screenshot)
@@ -1774,7 +1758,6 @@ Four decisions inside it are themselves the lesson:
 > 来源：2026-11-12「官网公告同步进工作台消息中心（未读标记 + 满出血弹窗）」需求落地 + 自检验收沉淀。
 > 适用仓库：`<repo>`（中后台前端，React + zustand + Vite + Tailwind）。
 > 颗粒度约定：每条都是**可复用的模式/坑**，给现象、正解、涉及文件，不逐行抄代码、也不只喊口号。
-> 本技能为本地攒稿，尚未 push GitHub；发布请走 workbuddy-skills 仓库双发流程（GitHub 英文 + SkillHub 中文，版本一致，脚本禁翻中文）。
 
 #### 0. 铁律（最高优先级，来自项目总记忆）
 
@@ -1903,10 +1886,8 @@ persistAdapter.migrateOrReseed(reseed)
 
 #### 本技能版本记录（前端纪律部分）
 
-- **前端纪律并入 v1.27.5（2026-11-13，本地攒稿）**：把原独立前端技能 v1.0.0 的「官网公告同步进消息中心」全链路踩坑（§1–§7、§9–§10）与双地址部署纪律（§8）并入本技能，并补「编码铁律 / 编码技能 / 编码纪律」触发词，使这些说法都指向本技能。原独立前端技能已删除。尚未 push GitHub。
 
 ---
-
 
 
 ## Document generation and diagrams
@@ -2058,8 +2039,6 @@ which does not change, and read the numbers off an approved sample.
   - For edge labels `bbox`/`foW` stays ≤200 (clamp). For node labels assert the box width and line count per the chosen W / themeCSS.
 - Verified final-state assertion (the final empirical state): A `divW=310, lines=2, overflow:false`; B/C `divW=175, lines=3, overflow:false`.
 - **The full Chromium build hangs forever with `--headless=new --dump-dom`** (8+ min, zero output) — Playwright (`chromium.launch()`) is the reliable path; `chrome-headless-shell --dump-dom` also works but Playwright is less fiddly for reading JSON.
-
-
 
 
 ## Internationalization and text refactor
@@ -2299,8 +2278,6 @@ which does not change, and read the numbers off an approved sample.
   capped review queue — a gate that cries wolf trains everyone to ignore it.
 
 
-
-
 ## Third-party integration and external auth
 
 ### Third-party platform integration & skill publishing iron rules
@@ -2368,7 +2345,6 @@ A developer wanted to add "AI pay-per-use" to their own skill. Full timeline map
 #### The artifact you ship is the thing to verify (2026-11-05)
 
 **You edit source; you hand over a file. Every step between the two can change bytes without saying so.** During one skill release, two LF-only markdown files were rewritten through `pathlib.write_text()` and came back with 1500+ CRLF line endings - `write_text()` translates newlines by default, reports nothing, keeps the line count, and the diff only says "the whole file changed". Two rules go together: (1) any rewrite of a line-ending-sensitive file passes `newline=''` explicitly; (2) after the rewrite, verify **the package you are about to hand out**, not the source directory - read the members back with `zipfile`, count the CRLF, and compare against the source byte for byte, only then ship. Stale bytes inside a rebuilt archive are invisible from the source tree.
-
 
 
 ### External-auth / cloud-SDK integration iron rules (WorkBuddy Cloud `/.cloud/auth`)
@@ -2531,7 +2507,6 @@ A developer wanted to add "AI pay-per-use" to their own skill. Full timeline map
 - [ ] Terms intent marker written at send, checked before callback verify, cleared after consent is stored (Rule 14)
 
 
-
 ## Deploy-surface iron rules
 
 ### Deploy-surface iron rules — the directory you deploy IS what the internet can read (2026-11-05)
@@ -2653,7 +2628,6 @@ Fix: a fallback that changes the *class* of output must be loud — log a warnin
 **[78] The platform's own CLI wrote the secrets into the build directory, and the console refused any config value containing a space.** After the first deploy, the build folder contained a generated `.env` holding every console variable in plaintext, including the secret key — created not by our code but by the deploy tool, on the machine, after a successful run. Separately, the console rejected values containing whitespace, so a sender of the form `Display Name <address>` could not be stored at all; and the display name is part of the product.
 
 Fix: after every build or deploy, enumerate the build tree for env/credential-looking files, and read the upload log line by line to confirm what is actually included — "it must not have been uploaded" is a belief, not a fact. Delete generated secret files afterwards, and have the deploy script do it every time. For value restrictions, do not fight the platform: store the bare value and rebuild the presentation in code (parse the address, substitute a default display name when none is present), then test the transformation across shapes — bare, with name, custom name, padded, empty — because the restricted form is now the normal case, not the exception.
-
 
 
 ## PS cmdlet defaults, cross-version and profile pitfalls
@@ -2787,8 +2761,6 @@ If you're parsing nested JSON, always pass `-Depth 10` (or higher) explicitly. D
 General principle: **for any cmdlet that takes a "Depth / Encoding / PassThru / Raw / NoType" parameter that defaults to "system-dependent", set it explicitly.** System defaults change across PS versions, locales, and platforms.
 
 
-
-
 ## Scripted demos and screencasts
 
 ### Animated demo / screencast traps (2026-11-18, from building a chain of scripted product demos)
@@ -2835,30 +2807,37 @@ Entries **[79]–[85]**. All examples are generic: `<stage>` is any fixed-size a
 - Before sign-off, replay the full timeline and sample positions at ≥4 timestamps instead of trusting one static frame.
 
 
+## Release history
 
-## Release history (maintenance only)
+Newest first.
 
-### Release history (kept at the end: maintenance only, does not affect day-to-day lookup)
-
-Every release after 1.9.0 -- 1.9.1 through 1.27.1 -- reached this platform in one batch on 2026-11-09. Releases are listed newest first.
-
-
-**The shopfront is a class list, not an enumeration.** `summary` names the families and points at `read_when`; it does not list entries. The enumeration form failed once already: between v1.11.0 and v1.15.0 twenty new entries landed and **nine** of them never reached `summary`, because nobody remembers to come back and edit a front matter. A class list only needs editing when a **new family** appears, which is the point — the front matter is the one part of this file that has no test behind it, so it has to be cheap to keep correct.
-
+- **v1.9.0 (2026-11-09)**: added `scripts/encoding_selfcheck.py` (one command checks CRLF + ASCII), the symptom-to-fix table, the scenario reading map, and a consolidated capability-boundaries section.
+- **v1.8.12**: added front-end Iron rule 4 — Edge headless print-render pipeline (assert pixels, not "it rendered").
+- **v1.8.9–1.8.11**: added the chapter purpose / inclusion criteria and field entries 13–18.
+- **v1.8.5–1.8.8**: Node/TS toolchain traps, TS discipline, union types, exemption-and-guard rules.
+- **v1.8.1–1.8.4**: skinning, WPS cloud, multiprocessing spawn, and the cloud-sync incident trilogy.
+- **v1.8.0**: added external-auth / cloud-SDK integration iron rules (9 rules).
+- **v1.7.0**: added front-end layout debugging iron rules.
+- **v1.6.0**: added third-party platform integration and skill-publishing iron rules.
+- **v1.5.1–1.5.2**: generalised examples and removed personal traces before publishing.
+- **v1.0.5**: de-identified the whole file (paths, names, product names, app ids replaced with placeholders).
+- **v1.0.1–1.0.4**: four rounds of missed-lesson patches — Bash keyword blocking, production `.bat` fixes, launcher path/quote/encoding cases, PowerShell flag interception and silent no-op paths.
+- **v1.0.0**: first release. CRLF + pure ASCII for `.ps1`/`.bat`/`.cmd`; binary write with forced CRLF; immediate self-check.
+- **v1.35.1 (2026-11-25)**: documentation cleanup only — removed internal-ledger phrasing from the release history, expanded history back to v1.0.0, and shortened the README to the coverage list and usage. No rule or script change.
 - **v1.35.0 (2026-11-25)**: **+6 field-tested entries and a structural reorganization.** Merged 33 top-level chapters into 13 themed chapters (original headings preserved as subsections, zero content loss); moved Release history to true end; folded the stray [93]-[97] lessons into existing sections. Added [93]-[98] (python -S bypassing the deletion shim, AI 'simulating' a launcher actually ran a destructive main, admin-rights launcher flash-death, GBK-to-UTF-8 log mojibake, junction islink() mis-detection, network/proxy transient failure + retry). Added an applicability-boundary note, a symptom->owner routing update, an end-to-end one-click checklist for destructive scripts, and a path self-check before command examples. No script behavior change.
-- **v1.34.1 (2026-11-25)**: +5 field-tested entries from the D-drive switch and conversation-recovery incident (python -S bypassing the sitecustomize deletion shim; an AI 'simulating' a bat line really ran a destructive main(); admin-rights launcher flash-death; GBK-to-UTF-8 log mojibake; junction islink() mis-detection). Local only, not published.
-- **v1.34.0 (2026-11-19)**: **+1 field-tested entry — a `python -c "..."` payload containing backticks gets eaten by bash as command substitution instead of reaching Python, producing `command not found` / `syntax error near unexpected token` and silently writing nothing** (use a quoted heredoc `python - <<'PY' ... PY` for any payload with backticks, `$`, or other shell metacharacters; an unquoted `<<PY` still expands; read the file back after writing). Distinct from the earlier double-quote-pairing trap — balanced quotes do not stop command substitution. One trigger word added to `read_when` in both copies. Chinese mirror aligned. **Local-only, not published.**
-- **v1.33.0 (2026-11-19)**: **+9 field-tested entries from the scripted "login gate" debugging chain — an exact-`Origin` mismatch that masqueraded as a broken token/key (Rule 10); a phone number that works through the SDK but gets HTTP 400 when POSTed raw, because the SDK normalizes it to `+86 ` + 11 digits (Rule 11); `email_redirect_to` silently switching to confirmation-link mail so no `verification_id` comes back (Rule 12); a ~5-minute one-shot `verification_id`/`verification_token` expiring between send and verify (Rule 13); and a `.tsx` exporting helpers beside its component, producing react-refresh warnings that broke `lint:baseline` and `npm run gate`; a terms checkbox bypassed by the mail callback (Rule 14); and three auth-driven front-end traps — semantic full-repo grep for a shared predicate, an error boundary with no reset, and a cloud cold start that skipped org creation** (derive `Origin` from `new URL(endpoint).origin`; copy the SDK's `normalizePhone` verbatim and don't "fix" its overseas-number quirk; omit `emailRedirectTo` for in-page code entry; keep send → input → verify inside the TTL; split helpers into their own module instead of raising the lint baseline; carry terms consent as a localStorage intent marker across the mail callback; grep the whole repo by meaning before changing a shared predicate; reset the route-level error boundary on pathname change; await org create/recover after `initAuth()` on cloud cold start). Rule 5's raw-verify snippet now carries the `Origin` header plus a cross-reference. One pre-existing desensitization leak repaired: a real whitelisted phone number is now `<白名单手机号>`. Nine trigger words added to `read_when` in both copies. Chinese mirror aligned. **Local-only, not published.**
-- **v1.32.0 (2026-11-18)**: **+6 field-tested entries from iterating a chain of scripted product demos — a state class written under one name and styled under another (permanently inert); a change highlight painted inside a display:none subtree (invisible update); a quantity revised mid-flow while later pages kept the old literal (self-contradiction); "centre" meaning the gap between two neighbours rather than the viewport (flex:1 + justify:center); a wizard header rewritten per step instead of naming the entity (title is not a caption); and a demo cursor that teleported at chapter boundaries and toured cards like a guide** (grep the class token on both writer and consumer sides; check computed display of a highlight and its ancestors; one owner per mutable quantity; ask "relative to what" before centring; title = identity, step context = pane; one click drives multi-step work and the cursor stays continuous across boundaries). Six trigger words added to `read_when` in both copies. **Local-only, not published.**
-- **v1.31.0 (2026-11-18)**: **+1 field-tested entry in the screencast family — [86] the exported video's clock read 55 s while its content had only reached 45 s, because the capture loop's wall-clock cap stayed hardcoded at 45 s after the animation grew to 56 s and the last frame's timestamp was clamped to hide the short capture** (derive the capture cap from animation total + headroom; assert the final scene's content state before normalising timestamps; a stop-condition and a timestamp normaliser must share one source of truth). One trigger word added to `read_when` in both copies. **Local-only, not published.**
-- **v1.30.0 (2026-11-18)**: **+7 field-tested entries from building a chain of scripted product demos (an animated wizard, a data dashboard, a report) that were both played interactively and exported to 4K video.** New section *Animated demo / screencast traps* — **[79] the export hid the playback toolbar, so video sign-off was green while the live preview showed the fake cursor pressing it** (verify in the state the user sees; enumerate everything the exporter removes); **[80] `flex-end` + `opacity:0` placeholders pushed the first chat bubble above the scroll origin and exposed a scrollbar** (block flow + `display:none` for hidden rows + scroll only on real overflow); **[81] the first avatar jumped down after a thinking card collapsed — `margin-top:auto` switches on/off as content crosses the container** (top-anchored block flow, sample first-bubble top at ≥4 timestamps); **[82] re-entering a scene replayed old dialog because setup staged the entry but never reset cumulative state** (`reset()` before `entry()`; three-state assert clean/replay); **[83] `setPane(data-p)` passed a 1-based DOM label as a 0-based array index — one blank pane, the rest off by one** (index APIs take array indices only); **[84] text overflowed a compact grid because a flex child lacked `min-width:0`** (the full truncate quartet, short label for compact slots); **[85] the exporter's `rmtree` of a reused browser-profile dir tripped the bulk-delete guard, failing in 2 s with empty stdout** (fresh empty profile dir per run). Plus a *Pre-flight for a scripted demo* list. Four trigger words added to `read_when`. **Local-only, not published.**
-- **v1.29.0 (2026-11-13)**: **+9 field-tested entries from rebuilding a customer-facing notification message and its send pipeline.** New section *Verification traps: four checks that passed while the thing was broken* — **[70] a validator generated through another language's string escaping lost its backslashes and became unconditionally true, with the syntax check still green** (use `startsWith`; and every check needs a negative case it must reject); **[71] identical padding values that still read as lopsided, because a solid block outweighs small type** (measure with `getBoundingClientRect` + `Range.getClientRects`, then compensate 2–4px optically and say so in the comment); **[72] "close enough" measured 0.09 mask overlap — an eyeballed reproduction was almost entirely wrong** (extract ground truth from the bitmap, compare IoU *and* each named dimension; `text-align` does not centre a block-level table child; check 1× DPR where fractional borders round down); **[73] tested from an allow-listed inbox and declared working while everyone outside got junk** (authenticate ≠ content; diff two near-identical messages instead of re-checking DNS; never tell the recipient to check spam). New section *Shipping a customer-facing pipeline: five ways it breaks after you deploy* — **[74] the fix was in the file but the service still served the approved-old version** (record live-vs-working-copy with dates); **[75] two awaited calls with no per-call timeout produced an intermittent 500 that retries hid** (`AbortSignal.timeout` + `Promise.allSettled` + log `err.stack`); **[76] the wrong message reached the right person because routing keyed on a recipient list instead of the intent** (pass an explicit flag, test the 2×2 matrix); **[77] an empty config value silently degraded the output to plain text** (loud fallbacks; health endpoints report effective values, not one boolean); **[78] the platform's own CLI wrote the secret key into a build-directory `.env`, and the console rejected values with spaces** (enumerate build artefacts for secrets every run; store the bare value and rebuild presentation in code). Eight trigger words added to `read_when`. `summary` no longer quotes a stale entry count (it said 110 while the file held 31 numbered entries / 133 sections) — the number is gone rather than guessed. **Local-only, not published.**
-- **v1.28.1 (2026-11-13)**: **hygiene pass — de-identified the whole file before any publish.** Project-specific traces that had accumulated in the merged front-end section and in `read_when` are now generic: repo paths → `<repo>` / `<workspace>`, product and domain names → `<prod-domain>` / `<staging-host>`, project and app ids → `<project-id>` / `<app-id>`, the former standalone skill's name → "a standalone front-end skill", and the admin-console description → "a React + zustand + Vite admin console". No entries added, no rules changed, frontmatter untouched except `version`; every placeholder is illustrative. Rationale: a published skill must never carry a real workspace path, product name or app id — the ledger teaches mechanisms, not someone's directory tree. **Local-only, not published.**
-- **v1.28.0 (2026-11-13)**: **+4 field-tested entries from rebuilding a deploy surface read-only — one shape: "the script believed it had succeeded because nothing threw".** **[66] a recursive file API (`cpSync` / `rmSync` with `recursive`) is eaten by the host's delete hook — exit code 127, empty stderr, no exception, and retrying never helps** (walk the tree yourself; `mkdirSync({recursive})` is *not* intercepted). **[67] an ownership guard built on a marker file self-locks as soon as the wipe deletes the marker and the run dies halfway** (judge ownership by content; clear the contents, not the directory). **[68] the validator wrote to the source it was validating** — refreshing a generated file and relocating credentials "to check them" (a guard is read-only by construction; produce corrected artefacts on the deploy copy and prove the source unchanged by hash). **[69] a Windows path typed with backslashes inside a shell heredoc loses its separators** (`\b` / `\o` read as escapes; the ENOENT path has none left). Four trigger words added to `read_when`. Note: `summary` still claims "110 numbered entries" while the file actually holds 132 `###` sections plus 23 numbered entries — left untouched rather than guess the original counting rule. **Local-only, not published.**
-- **v1.27.5 (2026-11-13)**: **+consolidation — a front-end coding discipline (formerly a standalone front-end skill) is merged into this skill.** No new trap entries, but a new top-level section "前端编码纪律" carries ten field-tested playbooks distilled from one feature build (announcement / notification / message-center): shared copy single-source, system announcements via store seed (keeps the NotificationPanel.test count assertion intact), an independent persisted read-tracking store, bootstrap order migrate→bootstrap→seed→render, full-bleed vs centered modal, merged unread badge across sources, i18n registration, the dual-address deploy guard (`deploy.py` single entry that blocks auto-created EdgeOne projects), production-bundle verification (grep store keys / fixed copy, not minified symbols), and persist migration discipline. `read_when` gains the trigger words the user actually says — "编码铁律" / "编码技能" / "编码纪律" — which all resolve to this skill. Local-only, not published.
-- **v1.27.4 (2026-11-12)**: **+1 field-tested entry in the deploy-target-binding family — the runtime mode is bound to the directory too.** **[65] re-publishing an app that ships a `server.js` (or a `package.json` `start: node …`) as pure static silently drops the server and every `/api/*` route returns 404, while the front-end keeps working because it calls the cloud SDK directly** — before re-publishing, assert the deploy mode is `node` (or `auto`), and after publishing probe one server route (401/403/200 = alive, 404 = server down); the cloud data is untouched, so the fix is re-publish as `node`, not reconstruct data. Trigger word added to `read_when`. Local-only, not published.
+- **v1.34.1 (2026-11-25)**: +5 field-tested entries from the D-drive switch and conversation-recovery incident (python -S bypassing the sitecustomize deletion shim; an AI 'simulating' a bat line really ran a destructive main(); admin-rights launcher flash-death; GBK-to-UTF-8 log mojibake; junction islink() mis-detection).
+- **v1.34.0 (2026-11-19)**: **+1 field-tested entry — a `python -c "..."` payload containing backticks gets eaten by bash as command substitution instead of reaching Python, producing `command not found` / `syntax error near unexpected token` and silently writing nothing** (use a quoted heredoc `python - <<'PY' ... PY` for any payload with backticks, `$`, or other shell metacharacters; an unquoted `<<PY` still expands; read the file back after writing). Distinct from the earlier double-quote-pairing trap — balanced quotes do not stop command substitution. One trigger word added to `read_when` in both copies. Chinese mirror aligned. ****
+- **v1.33.0 (2026-11-19)**: **+9 field-tested entries from the scripted "login gate" debugging chain — an exact-`Origin` mismatch that masqueraded as a broken token/key (Rule 10); a phone number that works through the SDK but gets HTTP 400 when POSTed raw, because the SDK normalizes it to `+86 ` + 11 digits (Rule 11); `email_redirect_to` silently switching to confirmation-link mail so no `verification_id` comes back (Rule 12); a ~5-minute one-shot `verification_id`/`verification_token` expiring between send and verify (Rule 13); and a `.tsx` exporting helpers beside its component, producing react-refresh warnings that broke `lint:baseline` and `npm run gate`; a terms checkbox bypassed by the mail callback (Rule 14); and three auth-driven front-end traps — semantic full-repo grep for a shared predicate, an error boundary with no reset, and a cloud cold start that skipped org creation** (derive `Origin` from `new URL(endpoint).origin`; copy the SDK's `normalizePhone` verbatim and don't "fix" its overseas-number quirk; omit `emailRedirectTo` for in-page code entry; keep send → input → verify inside the TTL; split helpers into their own module instead of raising the lint baseline; carry terms consent as a localStorage intent marker across the mail callback; grep the whole repo by meaning before changing a shared predicate; reset the route-level error boundary on pathname change; await org create/recover after `initAuth()` on cloud cold start). Rule 5's raw-verify snippet now carries the `Origin` header plus a cross-reference. One pre-existing desensitization leak repaired: a real whitelisted phone number is now `<白名单手机号>`. Nine trigger words added to `read_when` in both copies. Chinese mirror aligned. ****
+- **v1.32.0 (2026-11-18)**: **+6 field-tested entries from iterating a chain of scripted product demos — a state class written under one name and styled under another (permanently inert); a change highlight painted inside a display:none subtree (invisible update); a quantity revised mid-flow while later pages kept the old literal (self-contradiction); "centre" meaning the gap between two neighbours rather than the viewport (flex:1 + justify:center); a wizard header rewritten per step instead of naming the entity (title is not a caption); and a demo cursor that teleported at chapter boundaries and toured cards like a guide** (grep the class token on both writer and consumer sides; check computed display of a highlight and its ancestors; one owner per mutable quantity; ask "relative to what" before centring; title = identity, step context = pane; one click drives multi-step work and the cursor stays continuous across boundaries). Six trigger words added to `read_when` in both copies. ****
+- **v1.31.0 (2026-11-18)**: **+1 field-tested entry in the screencast family — [86] the exported video's clock read 55 s while its content had only reached 45 s, because the capture loop's wall-clock cap stayed hardcoded at 45 s after the animation grew to 56 s and the last frame's timestamp was clamped to hide the short capture** (derive the capture cap from animation total + headroom; assert the final scene's content state before normalising timestamps; a stop-condition and a timestamp normaliser must share one source of truth). One trigger word added to `read_when` in both copies. ****
+- **v1.30.0 (2026-11-18)**: **+7 field-tested entries from building a chain of scripted product demos (an animated wizard, a data dashboard, a report) that were both played interactively and exported to 4K video.** New section *Animated demo / screencast traps* — **[79] the export hid the playback toolbar, so video sign-off was green while the live preview showed the fake cursor pressing it** (verify in the state the user sees; enumerate everything the exporter removes); **[80] `flex-end` + `opacity:0` placeholders pushed the first chat bubble above the scroll origin and exposed a scrollbar** (block flow + `display:none` for hidden rows + scroll only on real overflow); **[81] the first avatar jumped down after a thinking card collapsed — `margin-top:auto` switches on/off as content crosses the container** (top-anchored block flow, sample first-bubble top at ≥4 timestamps); **[82] re-entering a scene replayed old dialog because setup staged the entry but never reset cumulative state** (`reset()` before `entry()`; three-state assert clean/replay); **[83] `setPane(data-p)` passed a 1-based DOM label as a 0-based array index — one blank pane, the rest off by one** (index APIs take array indices only); **[84] text overflowed a compact grid because a flex child lacked `min-width:0`** (the full truncate quartet, short label for compact slots); **[85] the exporter's `rmtree` of a reused browser-profile dir tripped the bulk-delete guard, failing in 2 s with empty stdout** (fresh empty profile dir per run). Plus a *Pre-flight for a scripted demo* list. Four trigger words added to `read_when`. ****
+- **v1.29.0 (2026-11-13)**: **+9 field-tested entries from rebuilding a customer-facing notification message and its send pipeline.** New section *Verification traps: four checks that passed while the thing was broken* — **[70] a validator generated through another language's string escaping lost its backslashes and became unconditionally true, with the syntax check still green** (use `startsWith`; and every check needs a negative case it must reject); **[71] identical padding values that still read as lopsided, because a solid block outweighs small type** (measure with `getBoundingClientRect` + `Range.getClientRects`, then compensate 2–4px optically and say so in the comment); **[72] "close enough" measured 0.09 mask overlap — an eyeballed reproduction was almost entirely wrong** (extract ground truth from the bitmap, compare IoU *and* each named dimension; `text-align` does not centre a block-level table child; check 1× DPR where fractional borders round down); **[73] tested from an allow-listed inbox and declared working while everyone outside got junk** (authenticate ≠ content; diff two near-identical messages instead of re-checking DNS; never tell the recipient to check spam). New section *Shipping a customer-facing pipeline: five ways it breaks after you deploy* — **[74] the fix was in the file but the service still served the approved-old version** (record live-vs-working-copy with dates); **[75] two awaited calls with no per-call timeout produced an intermittent 500 that retries hid** (`AbortSignal.timeout` + `Promise.allSettled` + log `err.stack`); **[76] the wrong message reached the right person because routing keyed on a recipient list instead of the intent** (pass an explicit flag, test the 2×2 matrix); **[77] an empty config value silently degraded the output to plain text** (loud fallbacks; health endpoints report effective values, not one boolean); **[78] the platform's own CLI wrote the secret key into a build-directory `.env`, and the console rejected values with spaces** (enumerate build artefacts for secrets every run; store the bare value and rebuild presentation in code). Eight trigger words added to `read_when`. `summary` no longer quotes a stale entry count (it said 110 while the file held 31 numbered entries / 133 sections) — the number is gone rather than guessed. ****
+- **v1.28.1 (2026-11-13)**: **hygiene pass — de-identified the whole file before any publish.** Project-specific traces that had accumulated in the merged front-end section and in `read_when` are now generic: repo paths → `<repo>` / `<workspace>`, product and domain names → `<prod-domain>` / `<staging-host>`, project and app ids → `<project-id>` / `<app-id>`, the former standalone skill's name → "a standalone front-end skill", and the admin-console description → "a React + zustand + Vite admin console". No entries added, no rules changed, frontmatter untouched except `version`; every placeholder is illustrative. Rationale: a published skill must never carry a real workspace path, product name or app id — the ledger teaches mechanisms, not someone's directory tree. ****
+- **v1.28.0 (2026-11-13)**: **+4 field-tested entries from rebuilding a deploy surface read-only — one shape: "the script believed it had succeeded because nothing threw".** **[66] a recursive file API (`cpSync` / `rmSync` with `recursive`) is eaten by the host's delete hook — exit code 127, empty stderr, no exception, and retrying never helps** (walk the tree yourself; `mkdirSync({recursive})` is *not* intercepted). **[67] an ownership guard built on a marker file self-locks as soon as the wipe deletes the marker and the run dies halfway** (judge ownership by content; clear the contents, not the directory). **[68] the validator wrote to the source it was validating** — refreshing a generated file and relocating credentials "to check them" (a guard is read-only by construction; produce corrected artefacts on the deploy copy and prove the source unchanged by hash). **[69] a Windows path typed with backslashes inside a shell heredoc loses its separators** (`\b` / `\o` read as escapes; the ENOENT path has none left). Four trigger words added to `read_when`. Note: `summary` still claims "110 numbered entries" while the file actually holds 132 `###` sections plus 23 numbered entries — left untouched rather than guess the original counting rule. ****
+- **v1.27.5 (2026-11-13)**: **+consolidation — a front-end coding discipline (formerly a standalone front-end skill) is merged into this skill.** No new trap entries, but a new top-level section "前端编码纪律" carries ten field-tested playbooks distilled from one feature build (announcement / notification / message-center): shared copy single-source, system announcements via store seed (keeps the NotificationPanel.test count assertion intact), an independent persisted read-tracking store, bootstrap order migrate→bootstrap→seed→render, full-bleed vs centered modal, merged unread badge across sources, i18n registration, the dual-address deploy guard (`deploy.py` single entry that blocks auto-created EdgeOne projects), production-bundle verification (grep store keys / fixed copy, not minified symbols), and persist migration discipline. `read_when` gains the trigger words the user actually says — "编码铁律" / "编码技能" / "编码纪律" — which all resolve to this skill.
+- **v1.27.4 (2026-11-12)**: **+1 field-tested entry in the deploy-target-binding family — the runtime mode is bound to the directory too.** **[65] re-publishing an app that ships a `server.js` (or a `package.json` `start: node …`) as pure static silently drops the server and every `/api/*` route returns 404, while the front-end keeps working because it calls the cloud SDK directly** — before re-publishing, assert the deploy mode is `node` (or `auto`), and after publishing probe one server route (401/403/200 = alive, 404 = server down); the cloud data is untouched, so the fix is re-publish as `node`, not reconstruct data. Trigger word added to `read_when`.
 
-- **v1.27.3 (2026-11-12)**: **+5 field-tested entries — front-end runtime traps distilled from one cloud migration (P0 switch, red-zone 4, orange-zone 157/159/160/161/162), every one "the dev server and unit tests are green, but the shipped artefact is the wrong shape".** **[60] a compile-time behaviour switch (Vite `import.meta.env.VITE_X` / webpack `DefinePlugin` / Flutter `--dart-define`) silently pins the product to its default when the injection never reaches the bundle** — the dev server and unit tests run on source, so both are green whether or not the switch exists; the only honest proof is grepping the built chunk for the injected symbol, not trusting the build log. **[61] an optimistic local update with a fire-and-forget remote write that only `logger.error`s on failure shows "saved" and loses everything on refresh** — a swallowed catch is worse than a thrown error; the UI must distinguish committed from not-committed, never "logged and hoped". **[62] a capability / readiness / channel flag that should be discovered at runtime but is hard-coded as a constant reports a fictional state forever** — "the probe does not exist yet" is not a licence to ship `backendReady: true` / five channels all `false` / an eight-row confidence table as literals; default to "unknown / probing" and wire the real probe before done. **[63] `Suspense fallback={null}` with no `ErrorBoundary` turns a stale lazy chunk hash (after a deploy) into a pure white screen with zero signal** — a different mechanism from the SPA-fallback white screen (that one is the server answering every path with the shell); here a client chunk failed to load, so wrap the lazy subtree and render a real, recoverable error state. **[64] rendering a read failure as `0` conflates "no data" with "the read failed"** — `null` and `0` are not the same value; keep an "unknown / failed" third state, never let a fetch error become a number, or a broken source looks exactly like a healthy empty one. No trigger words added; the two copies stay entry-for-entry aligned. **Local-only, not published.**
+- **v1.27.3 (2026-11-12)**: **+5 field-tested entries — front-end runtime traps distilled from one cloud migration (P0 switch, red-zone 4, orange-zone 157/159/160/161/162), every one "the dev server and unit tests are green, but the shipped artefact is the wrong shape".** **[60] a compile-time behaviour switch (Vite `import.meta.env.VITE_X` / webpack `DefinePlugin` / Flutter `--dart-define`) silently pins the product to its default when the injection never reaches the bundle** — the dev server and unit tests run on source, so both are green whether or not the switch exists; the only honest proof is grepping the built chunk for the injected symbol, not trusting the build log. **[61] an optimistic local update with a fire-and-forget remote write that only `logger.error`s on failure shows "saved" and loses everything on refresh** — a swallowed catch is worse than a thrown error; the UI must distinguish committed from not-committed, never "logged and hoped". **[62] a capability / readiness / channel flag that should be discovered at runtime but is hard-coded as a constant reports a fictional state forever** — "the probe does not exist yet" is not a licence to ship `backendReady: true` / five channels all `false` / an eight-row confidence table as literals; default to "unknown / probing" and wire the real probe before done. **[63] `Suspense fallback={null}` with no `ErrorBoundary` turns a stale lazy chunk hash (after a deploy) into a pure white screen with zero signal** — a different mechanism from the SPA-fallback white screen (that one is the server answering every path with the shell); here a client chunk failed to load, so wrap the lazy subtree and render a real, recoverable error state. **[64] rendering a read failure as `0` conflates "no data" with "the read failed"** — `null` and `0` are not the same value; keep an "unknown / failed" third state, never let a fetch error become a number, or a broken source looks exactly like a healthy empty one. No trigger words added; the two copies stay entry-for-entry aligned. ****
 
 - **v1.27.2 (2026-11-12)**: **+2 field-tested entries in the database-migration family — both are "the command ran, but the security truth did not move".** **[58] a `revoke … from public` returns success yet leaves `anon`'s auto-granted `EXECUTE` in place** — `public` and `anon` are separate grant targets and the platform re-attaches `anon` on `create function`, so the only ground truth is `information_schema.role_routine_grants` / the `pg_proc` `acl`, queried and asserted after every grant change. **[59] a `42501 permission denied` on a read is not evidence of an empty table** — it proves only that the calling role lacks `SELECT`; re-read with an authorized role to learn the true row count, or a dashboard reports "no data" for a full table and an audit waves through a table an attacker also cannot read. Both are the practical closure of ㊻ ("audit the defaults, revoke, then grant" is incomplete until you verify the revoke took). No trigger words added; the two copies stay entry-for-entry aligned.
 - **v1.27.1 (2026-11-09)**: **Documentation restructure only, no rule changed** -- the release history moved from the front to the end of the file, the per-release "not published" annotations were removed (they had become false once every release started shipping in one batch), a one-page Q&A was added after the one-liner, and the front-matter summary was cut down. Trigger words, entry text and gates are unchanged.
