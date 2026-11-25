@@ -31,7 +31,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PKG_NAME = "windows-script-encoding"
-VERSION = "1.27.1"
+VERSION = "1.35.0"
 DIST_SRC = ROOT / "dist" / PKG_NAME  # Chinese ShipHub-ready copy
 
 # Gate 1 checks every field against its OWN expected type. A whole-block test

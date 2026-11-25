@@ -72,6 +72,20 @@ For screenshot-flagged visual fixes: **measure** real geometry before changing
 offsets (never guess from the image), baseline-align number + unit typography,
 and headless-screenshot hygiene on Edge.
 
+### 10. Verification traps
+Checks that pass while the thing is broken: a validator generated through
+another language's string escaping that became unconditionally true (and a
+syntax check that stays green), equal paddings that still read as lopsided,
+"looks close" measured at 0.09 mask overlap, and a test message that arrives
+only in the allow-listed inbox you control.
+
+### 11. Shipping a customer-facing pipeline
+Five ways it breaks after you deploy: the fix is in the file but the service
+still serves the approved-old version; serial awaits without per-call timeouts
+producing a retry-masked 500; routing by a proxy attribute instead of the
+intent; an empty config value silently degrading the output; and the platform's
+own CLI writing your secret key into the build directory.
+
 ## How to use it
 
 1. Read the **Pre-flight checklist** (chapter 1) before writing/running any
@@ -79,7 +93,9 @@ and headless-screenshot hygiene on Edge.
 2. When you hit a platform/auth error that won't resolve, jump to the relevant
    chapter (7 for third-party platforms, 8 for cloud auth) — eight times out of
    ten one of the iron rules was broken.
-3. When a diagram or layout looks wrong, use chapters 6 and 9.
+3. When a diagram or layout looks wrong, use chapters 6 and 9. Before trusting
+   any check of your own, read chapter 10 — a gate that has never failed is not
+   evidence.
 
 ## Repository layout (dual-release)
 
