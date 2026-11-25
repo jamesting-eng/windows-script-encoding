@@ -2,7 +2,7 @@
 name: windows-script-encoding
 slug: windows-script-encoding
 displayName: Windows Script Encoding Iron Rules
-version: "1.35.1"
+version: "1.35.2"
 summary: One reusable ledger of engineering traps that actually bit — each entry states the symptom, the root cause and the fix — plus runnable checkers, covering Windows script encoding (CRLF + pure ASCII), launchers and cloud sync, deploy target and deploy surface, verification chains, data honesty, database migration, front-end layout and test visibility, HTML to DOCX, third-party publishing, front-end coding discipline, verifying a visual reproduction, and customer-facing notification pipelines. Start from read_when — each trigger names the moment before the rake.
 license: MIT
 tags:
@@ -22,8 +22,7 @@ description: |
   layout and test visibility, HTML to DOCX, third-party publishing.
 
   How to use it: read the one-liner and the pre-flight checklist first, then open
-  only the entries whose trigger matches your symptom. The release history sits at
-  the end of the file .
+  only the entries whose trigger matches your symptom.
 read_when:
   - 'Creating or modifying .ps1 / .bat / .cmd files'
   - 'A PowerShell script "looks like it ran but exits 1 with no error message"'
@@ -167,9 +166,6 @@ read_when:
   - 'A cloud existing user logs in and subpages crash because the org context was never created on cold start'
   - 'A python -c payload containing backticks fails with command not found or a syntax error near unexpected token'
 ---
-
-# windows-script-encoding — Windows Script Encoding Iron Rules
-
 
 ## Start here: scope, navigation and boundaries
 
@@ -2811,18 +2807,7 @@ Entries **[79]–[85]**. All examples are generic: `<stage>` is any fixed-size a
 
 Newest first.
 
-- **v1.9.0 (2026-11-09)**: added `scripts/encoding_selfcheck.py` (one command checks CRLF + ASCII), the symptom-to-fix table, the scenario reading map, and a consolidated capability-boundaries section.
-- **v1.8.12**: added front-end Iron rule 4 — Edge headless print-render pipeline (assert pixels, not "it rendered").
-- **v1.8.9–1.8.11**: added the chapter purpose / inclusion criteria and field entries 13–18.
-- **v1.8.5–1.8.8**: Node/TS toolchain traps, TS discipline, union types, exemption-and-guard rules.
-- **v1.8.1–1.8.4**: skinning, WPS cloud, multiprocessing spawn, and the cloud-sync incident trilogy.
-- **v1.8.0**: added external-auth / cloud-SDK integration iron rules (9 rules).
-- **v1.7.0**: added front-end layout debugging iron rules.
-- **v1.6.0**: added third-party platform integration and skill-publishing iron rules.
-- **v1.5.1–1.5.2**: generalised examples and removed personal traces before publishing.
-- **v1.0.5**: de-identified the whole file (paths, names, product names, app ids replaced with placeholders).
-- **v1.0.1–1.0.4**: four rounds of missed-lesson patches — Bash keyword blocking, production `.bat` fixes, launcher path/quote/encoding cases, PowerShell flag interception and silent no-op paths.
-- **v1.0.0**: first release. CRLF + pure ASCII for `.ps1`/`.bat`/`.cmd`; binary write with forced CRLF; immediate self-check.
+- **v1.35.2 (2026-11-25)**: documentation fix — restore a truncated sentence in `description` and sort all 50 release-history entries in descending version order. No rule or script change.
 - **v1.35.1 (2026-11-25)**: documentation cleanup only — removed internal-ledger phrasing from the release history, expanded history back to v1.0.0, and shortened the README to the coverage list and usage. No rule or script change.
 - **v1.35.0 (2026-11-25)**: **+6 field-tested entries and a structural reorganization.** Merged 33 top-level chapters into 13 themed chapters (original headings preserved as subsections, zero content loss); moved Release history to true end; folded the stray [93]-[97] lessons into existing sections. Added [93]-[98] (python -S bypassing the deletion shim, AI 'simulating' a launcher actually ran a destructive main, admin-rights launcher flash-death, GBK-to-UTF-8 log mojibake, junction islink() mis-detection, network/proxy transient failure + retry). Added an applicability-boundary note, a symptom->owner routing update, an end-to-end one-click checklist for destructive scripts, and a path self-check before command examples. No script behavior change.
 - **v1.34.1 (2026-11-25)**: +5 field-tested entries from the D-drive switch and conversation-recovery incident (python -S bypassing the sitecustomize deletion shim; an AI 'simulating' a bat line really ran a destructive main(); admin-rights launcher flash-death; GBK-to-UTF-8 log mojibake; junction islink() mis-detection).
@@ -2865,3 +2850,15 @@ Newest first.
 - **v1.9.1 (2026-10-25)**: +3 field-tested entries — ① cloud-sync placeholder reparse point makes Edit/Write silently no-op (read back to confirm bytes / hydrate via Python) ② prefer `git -C <physical-path>` with bare PATH git, avoiding versioned-exe drift + sandbox interception ③ verification is proof not confirmation — independently re-verify a reported commit (`git show` file manifest + targeted rerun + tsc), never trust the self-report.
 
 ---
+- **v1.9.0 (2026-11-09)**: added `scripts/encoding_selfcheck.py` (one command checks CRLF + ASCII), the symptom-to-fix table, the scenario reading map, and a consolidated capability-boundaries section.
+- **v1.8.12**: added front-end Iron rule 4 — Edge headless print-render pipeline (assert pixels, not "it rendered").
+- **v1.8.9–1.8.11**: added the chapter purpose / inclusion criteria and field entries 13–18.
+- **v1.8.5–1.8.8**: Node/TS toolchain traps, TS discipline, union types, exemption-and-guard rules.
+- **v1.8.1–1.8.4**: skinning, WPS cloud, multiprocessing spawn, and the cloud-sync incident trilogy.
+- **v1.8.0**: added external-auth / cloud-SDK integration iron rules (9 rules).
+- **v1.7.0**: added front-end layout debugging iron rules.
+- **v1.6.0**: added third-party platform integration and skill-publishing iron rules.
+- **v1.5.1–1.5.2**: generalised examples and removed personal traces before publishing.
+- **v1.0.5**: de-identified the whole file (paths, names, product names, app ids replaced with placeholders).
+- **v1.0.1–1.0.4**: four rounds of missed-lesson patches — Bash keyword blocking, production `.bat` fixes, launcher path/quote/encoding cases, PowerShell flag interception and silent no-op paths.
+- **v1.0.0**: first release. CRLF + pure ASCII for `.ps1`/`.bat`/`.cmd`; binary write with forced CRLF; immediate self-check.
